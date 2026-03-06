@@ -3,12 +3,18 @@
 
 const App = (() => {
     let _currentSessionId = null;
+    let _logoutBound = false;
 
     function showApp(user) {
         document.getElementById('auth-overlay').hidden = true;
         document.getElementById('app').hidden = false;
         Sanitize.setText(document.getElementById('user-name'), user.name);
-        document.getElementById('logout-btn').addEventListener('click', handleLogout);
+
+        if (!_logoutBound) {
+            document.getElementById('logout-btn').addEventListener('click', handleLogout);
+            document.getElementById('download-data-btn').addEventListener('click', () => handleDownload(user.user_id));
+            _logoutBound = true;
+        }
     }
 
     function showAuth() {
@@ -18,6 +24,7 @@ const App = (() => {
     }
 
     async function handleLogout() {
+        _logoutBound = false;
         await Auth.logout();
     }
 
@@ -31,7 +38,8 @@ const App = (() => {
     }
 
     async function initMainApp(user) {
-        // Load sessions and results in parallel
+        Chat.init();
+
         try {
             const [sessionsRes, resultsRes] = await Promise.all([
                 fetch('/sessions'),
@@ -43,16 +51,29 @@ const App = (() => {
                 Sessions.render(sessions);
                 if (sessions.length > 0) {
                     Sessions.activate(sessions[0].session_id);
+                } else {
+                    // Create first session automatically
+                    await Sessions.createNew();
                 }
+            } else {
+                // No sessions endpoint or error — create new
+                await Sessions.createNew();
             }
 
             if (resultsRes.ok) {
                 const results = await resultsRes.json();
                 Results.update(results, user.current_phase);
+            } else {
+                // No results yet — show default orientation
+                Results.update({}, user.current_phase || 'orientation');
             }
         } catch (err) {
             console.error('[App] Init failed:', err.message);
         }
+    }
+
+    function handleDownload(userId) {
+        window.location.href = '/export/' + encodeURIComponent(userId);
     }
 
     function getCurrentSessionId() {
