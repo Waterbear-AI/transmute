@@ -3,9 +3,14 @@ from contextlib import asynccontextmanager
 from pathlib import Path
 
 import uvicorn
-from fastapi import FastAPI
+from fastapi import FastAPI, Request
+from fastapi.responses import JSONResponse
 from fastapi.staticfiles import StaticFiles
+from slowapi import Limiter, _rate_limit_exceeded_handler
+from slowapi.errors import RateLimitExceeded
+from slowapi.util import get_remote_address
 
+from api.auth import router as auth_router
 from db.database import run_migrations
 
 logger = logging.getLogger(__name__)
@@ -22,10 +27,14 @@ async def lifespan(app: FastAPI):
     yield
 
 
+limiter = Limiter(key_func=get_remote_address)
+
 app = FastAPI(title="Transmutation Engine", lifespan=lifespan)
+app.state.limiter = limiter
+app.add_exception_handler(RateLimitExceeded, _rate_limit_exceeded_handler)
 
 # Include API routers
-# app.include_router(auth_router, prefix="/auth", tags=["auth"])
+app.include_router(auth_router)
 
 # Mount frontend static files last (catches all unmatched routes)
 if FRONTEND_DIR.exists():
