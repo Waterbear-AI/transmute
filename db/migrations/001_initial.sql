@@ -97,14 +97,17 @@ CREATE TABLE safety_log (
 
 -- ADK sessions
 CREATE TABLE adk_sessions (
-    user_id             TEXT NOT NULL,
-    session_id          TEXT NOT NULL,
+    session_id          TEXT PRIMARY KEY,
+    user_id             TEXT NOT NULL REFERENCES users(id),
     app_name            TEXT,
-    session_state       TEXT,
+    session_state       JSON,
     archived            BOOLEAN DEFAULT FALSE,
     total_input_tokens  INTEGER DEFAULT 0,
     total_output_tokens INTEGER DEFAULT 0,
     estimated_cost_usd  REAL DEFAULT 0.0,
-    updated_at          TIMESTAMP,
-    PRIMARY KEY (user_id, session_id)
+    created_at          TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    updated_at          TIMESTAMP
 );
+
+CREATE INDEX idx_adk_sessions_user_id ON adk_sessions(user_id);
+CREATE INDEX idx_adk_sessions_archived ON adk_sessions(archived);
