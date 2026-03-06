@@ -7,7 +7,55 @@
     <link rel="stylesheet" href="/css/app.css">
 </head>
 <body>
-    <div id="app"></div>
+    <!-- Auth overlay (shown when not logged in) -->
+    <div id="auth-overlay" class="auth-overlay">
+        <div id="auth-container" class="auth-container"></div>
+    </div>
+
+    <!-- Main app (hidden until authenticated) -->
+    <div id="app" class="app-layout" hidden>
+        <!-- Top bar -->
+        <header class="top-bar">
+            <div class="top-bar__title">Transmutation Engine</div>
+            <div class="top-bar__right">
+                <span id="cost-display" class="top-bar__cost"></span>
+                <span id="user-name" class="top-bar__user"></span>
+                <button id="logout-btn" class="top-bar__logout" type="button">Logout</button>
+            </div>
+        </header>
+
+        <!-- Main content: two-panel layout -->
+        <main class="main-panels">
+            <!-- Left panel: Chat -->
+            <section class="panel-chat" id="chat-panel">
+                <div class="chat-messages" id="chat-messages"></div>
+                <div class="chat-input-area">
+                    <form id="chat-form" class="chat-form">
+                        <input type="text" id="chat-input" class="chat-input"
+                               placeholder="Type a message..." autocomplete="off">
+                        <button type="submit" class="chat-send-btn">Send</button>
+                    </form>
+                </div>
+            </section>
+
+            <!-- Right panel: Results -->
+            <section class="panel-results" id="results-panel">
+                <div class="results-header" id="results-header">
+                    <nav class="results-tabs" id="results-tabs" role="tablist"></nav>
+                </div>
+                <div class="results-content" id="results-content"></div>
+                <div class="results-footer">
+                    <button id="download-data-btn" class="btn-download" type="button">Download My Data</button>
+                </div>
+            </section>
+        </main>
+
+        <!-- Bottom bar: Sessions -->
+        <footer class="bottom-bar" id="bottom-bar">
+            <div class="session-list" id="session-list"></div>
+        </footer>
+    </div>
+
     <script src="/js/sanitize.js"></script>
     <script src="/js/app.js"></script>
 </body>
