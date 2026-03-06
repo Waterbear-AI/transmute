@@ -7,16 +7,13 @@ from typing import Optional
 import bcrypt
 from fastapi import APIRouter, Cookie, HTTPException, Request, Response
 from pydantic import BaseModel, EmailStr
-from slowapi import Limiter
-from slowapi.util import get_remote_address
-
 from config import get_settings
 from db.database import get_db_session
+from rate_limit import limiter
 
 logger = logging.getLogger(__name__)
 
 router = APIRouter(prefix="/auth", tags=["auth"])
-limiter = Limiter(key_func=get_remote_address)
 
 COOKIE_NAME = "transmute_session"
 COOKIE_MAX_AGE = 60 * 60 * 24 * 30  # 30 days

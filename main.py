@@ -6,12 +6,12 @@ import uvicorn
 from fastapi import FastAPI, Request
 from fastapi.responses import JSONResponse
 from fastapi.staticfiles import StaticFiles
-from slowapi import Limiter, _rate_limit_exceeded_handler
+from slowapi import _rate_limit_exceeded_handler
 from slowapi.errors import RateLimitExceeded
-from slowapi.util import get_remote_address
 
 from api.auth import router as auth_router
 from db.database import run_migrations
+from rate_limit import limiter
 
 logger = logging.getLogger(__name__)
 
@@ -26,8 +26,6 @@ async def lifespan(app: FastAPI):
     logger.info("Database migrations complete")
     yield
 
-
-limiter = Limiter(key_func=get_remote_address)
 
 app = FastAPI(title="Transmutation Engine", lifespan=lifespan)
 app.state.limiter = limiter
