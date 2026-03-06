@@ -1,0 +1,11 @@
+model:
+  provider: anthropic          # anthropic | openai | bedrock | ollama
+  model_id: claude-sonnet-4-5-20250514  # provider-specific model ID
+  api_key_env: ANTHROPIC_API_KEY  # env var name containing the key
+
+# Cost tracking (per 1M tokens)
+model_costs:
+  claude-sonnet-4-5-20250514: { input: 3.00, output: 15.00 }
+  gpt-4o: { input: 2.50, output: 10.00 }
+  gpt-4o-mini: { input: 0.15, output: 0.60 }
+  "ollama/*": { input: 0.00, output: 0.00 }
