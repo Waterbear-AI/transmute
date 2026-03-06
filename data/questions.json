@@ -1,0 +1,672 @@
+{
+  "version": "1.0",
+  "meta": {
+    "total_likert": 40,
+    "total_scenarios": 5,
+    "dimensions": 4,
+    "scale_types": {
+      "agreement_5": {
+        "points": 5,
+        "labels": ["Strongly Disagree", "Disagree", "Neutral", "Agree", "Strongly Agree"]
+      },
+      "frequency_5": {
+        "points": 5,
+        "labels": ["Never", "Rarely", "Sometimes", "Often", "Always"]
+      }
+    }
+  },
+  "questions": [
+    {
+      "id": "ea_rec_01",
+      "type": "likert",
+      "dimension": "Emotional Awareness",
+      "sub_dimension": "Emotion Recognition",
+      "text": "I can usually identify what specific emotion I am feeling in the moment.",
+      "scale_type": "agreement_5",
+      "order": 1,
+      "reverse_scored": false,
+      "tags": ["core"],
+      "source": "awareness-framework-v1"
+    },
+    {
+      "id": "ea_rec_02",
+      "type": "likert",
+      "dimension": "Emotional Awareness",
+      "sub_dimension": "Emotion Recognition",
+      "text": "I notice shifts in my emotional state throughout the day.",
+      "scale_type": "frequency_5",
+      "order": 2,
+      "reverse_scored": false,
+      "tags": ["core"],
+      "source": "awareness-framework-v1"
+    },
+    {
+      "id": "ea_rec_03",
+      "type": "likert",
+      "dimension": "Emotional Awareness",
+      "sub_dimension": "Emotion Recognition",
+      "text": "I have difficulty naming what I'm feeling beyond 'good' or 'bad'.",
+      "scale_type": "agreement_5",
+      "order": 3,
+      "reverse_scored": true,
+      "tags": ["core"],
+      "source": "awareness-framework-v1"
+    },
+    {
+      "id": "ea_reg_01",
+      "type": "likert",
+      "dimension": "Emotional Awareness",
+      "sub_dimension": "Emotional Regulation",
+      "text": "When I feel a strong emotion, I can choose how to respond rather than reacting automatically.",
+      "scale_type": "agreement_5",
+      "order": 4,
+      "reverse_scored": false,
+      "tags": ["core"],
+      "source": "awareness-framework-v1"
+    },
+    {
+      "id": "ea_reg_02",
+      "type": "likert",
+      "dimension": "Emotional Awareness",
+      "sub_dimension": "Emotional Regulation",
+      "text": "I use specific strategies to manage difficult emotions.",
+      "scale_type": "frequency_5",
+      "order": 5,
+      "reverse_scored": false,
+      "tags": ["core"],
+      "source": "awareness-framework-v1"
+    },
+    {
+      "id": "ea_reg_03",
+      "type": "likert",
+      "dimension": "Emotional Awareness",
+      "sub_dimension": "Emotional Regulation",
+      "text": "I often lose my temper before I realize what's happening.",
+      "scale_type": "frequency_5",
+      "order": 6,
+      "reverse_scored": true,
+      "tags": ["core"],
+      "source": "awareness-framework-v1"
+    },
+    {
+      "id": "ea_emp_01",
+      "type": "likert",
+      "dimension": "Emotional Awareness",
+      "sub_dimension": "Empathic Attunement",
+      "text": "I can sense how others are feeling even when they don't say anything.",
+      "scale_type": "agreement_5",
+      "order": 7,
+      "reverse_scored": false,
+      "tags": ["core"],
+      "source": "awareness-framework-v1"
+    },
+    {
+      "id": "ea_emp_02",
+      "type": "likert",
+      "dimension": "Emotional Awareness",
+      "sub_dimension": "Empathic Attunement",
+      "text": "I find myself absorbing the emotions of people around me.",
+      "scale_type": "frequency_5",
+      "order": 8,
+      "reverse_scored": false,
+      "tags": ["interpersonal"],
+      "source": "awareness-framework-v1"
+    },
+    {
+      "id": "ea_emp_03",
+      "type": "likert",
+      "dimension": "Emotional Awareness",
+      "sub_dimension": "Empathic Attunement",
+      "text": "I adjust my communication style based on others' emotional states.",
+      "scale_type": "frequency_5",
+      "order": 9,
+      "reverse_scored": false,
+      "tags": ["interpersonal"],
+      "source": "awareness-framework-v1"
+    },
+    {
+      "id": "ea_trig_01",
+      "type": "likert",
+      "dimension": "Emotional Awareness",
+      "sub_dimension": "Trigger Awareness",
+      "text": "I know which situations or people tend to trigger strong emotional reactions in me.",
+      "scale_type": "agreement_5",
+      "order": 10,
+      "reverse_scored": false,
+      "tags": ["core"],
+      "source": "awareness-framework-v1"
+    },
+    {
+      "id": "sa_comm_01",
+      "type": "likert",
+      "dimension": "Social Awareness",
+      "sub_dimension": "Communication Patterns",
+      "text": "I pay attention to how my words affect others during conversations.",
+      "scale_type": "frequency_5",
+      "order": 11,
+      "reverse_scored": false,
+      "tags": ["interpersonal"],
+      "source": "awareness-framework-v1"
+    },
+    {
+      "id": "sa_comm_02",
+      "type": "likert",
+      "dimension": "Social Awareness",
+      "sub_dimension": "Communication Patterns",
+      "text": "I notice when I'm dominating a conversation or not giving others space to speak.",
+      "scale_type": "frequency_5",
+      "order": 12,
+      "reverse_scored": false,
+      "tags": ["interpersonal"],
+      "source": "awareness-framework-v1"
+    },
+    {
+      "id": "sa_comm_03",
+      "type": "likert",
+      "dimension": "Social Awareness",
+      "sub_dimension": "Communication Patterns",
+      "text": "I listen to understand, not just to respond.",
+      "scale_type": "agreement_5",
+      "order": 13,
+      "reverse_scored": false,
+      "tags": ["core"],
+      "source": "awareness-framework-v1"
+    },
+    {
+      "id": "sa_bound_01",
+      "type": "likert",
+      "dimension": "Social Awareness",
+      "sub_dimension": "Boundary Recognition",
+      "text": "I can identify when someone is setting a boundary, even if they don't say it directly.",
+      "scale_type": "agreement_5",
+      "order": 14,
+      "reverse_scored": false,
+      "tags": ["interpersonal"],
+      "source": "awareness-framework-v1"
+    },
+    {
+      "id": "sa_bound_02",
+      "type": "likert",
+      "dimension": "Social Awareness",
+      "sub_dimension": "Boundary Recognition",
+      "text": "I have clear personal boundaries that I communicate to others.",
+      "scale_type": "agreement_5",
+      "order": 15,
+      "reverse_scored": false,
+      "tags": ["core"],
+      "source": "awareness-framework-v1"
+    },
+    {
+      "id": "sa_dyn_01",
+      "type": "likert",
+      "dimension": "Social Awareness",
+      "sub_dimension": "Group Dynamics",
+      "text": "I notice power dynamics in group settings.",
+      "scale_type": "frequency_5",
+      "order": 16,
+      "reverse_scored": false,
+      "tags": ["interpersonal"],
+      "source": "awareness-framework-v1"
+    },
+    {
+      "id": "sa_dyn_02",
+      "type": "likert",
+      "dimension": "Social Awareness",
+      "sub_dimension": "Group Dynamics",
+      "text": "I'm aware of how my presence changes the energy of a group.",
+      "scale_type": "agreement_5",
+      "order": 17,
+      "reverse_scored": false,
+      "tags": ["interpersonal"],
+      "source": "awareness-framework-v1"
+    },
+    {
+      "id": "sa_rel_01",
+      "type": "likert",
+      "dimension": "Social Awareness",
+      "sub_dimension": "Relational Impact",
+      "text": "I consider the long-term impact of my actions on relationships.",
+      "scale_type": "frequency_5",
+      "order": 18,
+      "reverse_scored": false,
+      "tags": ["core"],
+      "source": "awareness-framework-v1"
+    },
+    {
+      "id": "sa_rel_02",
+      "type": "likert",
+      "dimension": "Social Awareness",
+      "sub_dimension": "Relational Impact",
+      "text": "I notice patterns in how my relationships with others evolve over time.",
+      "scale_type": "frequency_5",
+      "order": 19,
+      "reverse_scored": false,
+      "tags": ["core"],
+      "source": "awareness-framework-v1"
+    },
+    {
+      "id": "sa_rel_03",
+      "type": "likert",
+      "dimension": "Social Awareness",
+      "sub_dimension": "Relational Impact",
+      "text": "I struggle to see how my behavior affects other people.",
+      "scale_type": "agreement_5",
+      "order": 20,
+      "reverse_scored": true,
+      "tags": ["core"],
+      "source": "awareness-framework-v1"
+    },
+    {
+      "id": "mc_self_01",
+      "type": "likert",
+      "dimension": "Meta-Cognitive Awareness",
+      "sub_dimension": "Self-Reflection",
+      "text": "I regularly reflect on my own thinking patterns and biases.",
+      "scale_type": "frequency_5",
+      "order": 21,
+      "reverse_scored": false,
+      "tags": ["core"],
+      "source": "awareness-framework-v1"
+    },
+    {
+      "id": "mc_self_02",
+      "type": "likert",
+      "dimension": "Meta-Cognitive Awareness",
+      "sub_dimension": "Self-Reflection",
+      "text": "I can describe the reasoning process I use to make decisions.",
+      "scale_type": "agreement_5",
+      "order": 22,
+      "reverse_scored": false,
+      "tags": ["core"],
+      "source": "awareness-framework-v1"
+    },
+    {
+      "id": "mc_self_03",
+      "type": "likert",
+      "dimension": "Meta-Cognitive Awareness",
+      "sub_dimension": "Self-Reflection",
+      "text": "I question my assumptions when I notice I might be wrong.",
+      "scale_type": "frequency_5",
+      "order": 23,
+      "reverse_scored": false,
+      "tags": ["core"],
+      "source": "awareness-framework-v1"
+    },
+    {
+      "id": "mc_bias_01",
+      "type": "likert",
+      "dimension": "Meta-Cognitive Awareness",
+      "sub_dimension": "Bias Detection",
+      "text": "I can recognize when my judgment is being influenced by a cognitive bias.",
+      "scale_type": "agreement_5",
+      "order": 24,
+      "reverse_scored": false,
+      "tags": ["core"],
+      "source": "awareness-framework-v1"
+    },
+    {
+      "id": "mc_bias_02",
+      "type": "likert",
+      "dimension": "Meta-Cognitive Awareness",
+      "sub_dimension": "Bias Detection",
+      "text": "I actively look for evidence that contradicts my existing beliefs.",
+      "scale_type": "frequency_5",
+      "order": 25,
+      "reverse_scored": false,
+      "tags": ["core"],
+      "source": "awareness-framework-v1"
+    },
+    {
+      "id": "mc_learn_01",
+      "type": "likert",
+      "dimension": "Meta-Cognitive Awareness",
+      "sub_dimension": "Learning Awareness",
+      "text": "I know what strategies help me learn most effectively.",
+      "scale_type": "agreement_5",
+      "order": 26,
+      "reverse_scored": false,
+      "tags": ["core"],
+      "source": "awareness-framework-v1"
+    },
+    {
+      "id": "mc_learn_02",
+      "type": "likert",
+      "dimension": "Meta-Cognitive Awareness",
+      "sub_dimension": "Learning Awareness",
+      "text": "I notice when I don't understand something and seek clarification.",
+      "scale_type": "frequency_5",
+      "order": 27,
+      "reverse_scored": false,
+      "tags": ["core"],
+      "source": "awareness-framework-v1"
+    },
+    {
+      "id": "mc_persp_01",
+      "type": "likert",
+      "dimension": "Meta-Cognitive Awareness",
+      "sub_dimension": "Perspective Taking",
+      "text": "I can hold multiple perspectives on an issue simultaneously.",
+      "scale_type": "agreement_5",
+      "order": 28,
+      "reverse_scored": false,
+      "tags": ["core"],
+      "source": "awareness-framework-v1"
+    },
+    {
+      "id": "mc_persp_02",
+      "type": "likert",
+      "dimension": "Meta-Cognitive Awareness",
+      "sub_dimension": "Perspective Taking",
+      "text": "I consider how someone with a very different life experience might see a situation.",
+      "scale_type": "frequency_5",
+      "order": 29,
+      "reverse_scored": false,
+      "tags": ["interpersonal"],
+      "source": "awareness-framework-v1"
+    },
+    {
+      "id": "mc_persp_03",
+      "type": "likert",
+      "dimension": "Meta-Cognitive Awareness",
+      "sub_dimension": "Perspective Taking",
+      "text": "I find it hard to understand why people hold views that are very different from mine.",
+      "scale_type": "agreement_5",
+      "order": 30,
+      "reverse_scored": true,
+      "tags": ["core"],
+      "source": "awareness-framework-v1"
+    },
+    {
+      "id": "tc_filt_01",
+      "type": "likert",
+      "dimension": "Transmutation Capacity",
+      "sub_dimension": "Deprivation Filtering",
+      "text": "When someone directs negativity at me, I can process it without passing it on to others.",
+      "scale_type": "agreement_5",
+      "order": 31,
+      "reverse_scored": false,
+      "tags": ["core", "transmutarian"],
+      "source": "transmutarianism-v13-s3"
+    },
+    {
+      "id": "tc_filt_02",
+      "type": "likert",
+      "dimension": "Transmutation Capacity",
+      "sub_dimension": "Deprivation Filtering",
+      "text": "I break cycles of negativity rather than continuing them.",
+      "scale_type": "frequency_5",
+      "order": 32,
+      "reverse_scored": false,
+      "tags": ["core", "transmutarian"],
+      "source": "transmutarianism-v13-s3"
+    },
+    {
+      "id": "tc_filt_03",
+      "type": "likert",
+      "dimension": "Transmutation Capacity",
+      "sub_dimension": "Deprivation Filtering",
+      "text": "I can sit with someone's pain without needing to fix it or pass it along.",
+      "scale_type": "agreement_5",
+      "order": 33,
+      "reverse_scored": false,
+      "tags": ["interpersonal", "transmutarian"],
+      "source": "transmutarianism-v13-s3"
+    },
+    {
+      "id": "tc_emit_01",
+      "type": "likert",
+      "dimension": "Transmutation Capacity",
+      "sub_dimension": "Fulfillment Emission",
+      "text": "When I experience something good, I naturally share it with others.",
+      "scale_type": "frequency_5",
+      "order": 34,
+      "reverse_scored": false,
+      "tags": ["core", "transmutarian"],
+      "source": "transmutarianism-v13-s3"
+    },
+    {
+      "id": "tc_emit_02",
+      "type": "likert",
+      "dimension": "Transmutation Capacity",
+      "sub_dimension": "Fulfillment Emission",
+      "text": "Others would say I uplift the people around me.",
+      "scale_type": "agreement_5",
+      "order": 35,
+      "reverse_scored": false,
+      "tags": ["interpersonal", "transmutarian"],
+      "source": "transmutarianism-v13-s3"
+    },
+    {
+      "id": "tc_amp_01",
+      "type": "likert",
+      "dimension": "Transmutation Capacity",
+      "sub_dimension": "Amplification Awareness",
+      "text": "I notice when I'm amplifying a negative situation rather than calming it.",
+      "scale_type": "frequency_5",
+      "order": 36,
+      "reverse_scored": false,
+      "tags": ["core", "transmutarian"],
+      "source": "transmutarianism-v13-s3"
+    },
+    {
+      "id": "tc_amp_02",
+      "type": "likert",
+      "dimension": "Transmutation Capacity",
+      "sub_dimension": "Amplification Awareness",
+      "text": "I sometimes make conflicts worse without meaning to.",
+      "scale_type": "frequency_5",
+      "order": 37,
+      "reverse_scored": true,
+      "tags": ["core", "transmutarian"],
+      "source": "transmutarianism-v13-s3"
+    },
+    {
+      "id": "tc_abs_01",
+      "type": "likert",
+      "dimension": "Transmutation Capacity",
+      "sub_dimension": "Absorption Patterns",
+      "text": "I tend to consume positive experiences privately rather than sharing them outward.",
+      "scale_type": "frequency_5",
+      "order": 38,
+      "reverse_scored": true,
+      "tags": ["core", "transmutarian"],
+      "source": "transmutarianism-v13-s3"
+    },
+    {
+      "id": "tc_abs_02",
+      "type": "likert",
+      "dimension": "Transmutation Capacity",
+      "sub_dimension": "Absorption Patterns",
+      "text": "I recognize when I'm holding onto something that would be better shared.",
+      "scale_type": "agreement_5",
+      "order": 39,
+      "reverse_scored": false,
+      "tags": ["core", "transmutarian"],
+      "source": "transmutarianism-v13-s3"
+    },
+    {
+      "id": "tc_cond_01",
+      "type": "likert",
+      "dimension": "Transmutation Capacity",
+      "sub_dimension": "Conduit Recognition",
+      "text": "I notice when I'm just passing experiences through without processing them.",
+      "scale_type": "frequency_5",
+      "order": 40,
+      "reverse_scored": false,
+      "tags": ["core", "transmutarian"],
+      "source": "transmutarianism-v13-s3"
+    }
+  ],
+  "scenarios": [
+    {
+      "id": "sc_belong_01",
+      "type": "scenario",
+      "dimension": "Transmutation Capacity",
+      "sub_dimension": "Deprivation Filtering",
+      "maslow_level": "belonging",
+      "narrative": "Your coworker is struggling with their workload and comes to you visibly stressed. They start venting about how overwhelmed they feel and how unfair the situation is.",
+      "choices": [
+        {
+          "key": "a",
+          "text": "Listen deeply and help them process what they're feeling, offering calm presence",
+          "quadrant_weight": {"transmuter": 1.0}
+        },
+        {
+          "key": "b",
+          "text": "Take on their stress as your own — you can't help but feel overwhelmed too",
+          "quadrant_weight": {"absorber": 1.0}
+        },
+        {
+          "key": "c",
+          "text": "Acknowledge their frustration briefly and suggest they talk to their manager",
+          "quadrant_weight": {"conduit": 1.0}
+        },
+        {
+          "key": "d",
+          "text": "Feel a sense of relief or satisfaction that it's their problem, not yours",
+          "quadrant_weight": {"extractor": 1.0}
+        }
+      ],
+      "follow_up_prompt": "Can you think of a specific time this happened? What did you actually do?",
+      "order": 1,
+      "tags": ["interpersonal", "belonging"],
+      "source": "transmutarianism-v13-s4"
+    },
+    {
+      "id": "sc_esteem_01",
+      "type": "scenario",
+      "dimension": "Transmutation Capacity",
+      "sub_dimension": "Fulfillment Emission",
+      "maslow_level": "esteem",
+      "narrative": "You receive unexpected recognition at work for a project you led. Your team contributed significantly, but you're the one being praised publicly.",
+      "choices": [
+        {
+          "key": "a",
+          "text": "Immediately redirect credit to the team and amplify their contributions publicly",
+          "quadrant_weight": {"transmuter": 1.0}
+        },
+        {
+          "key": "b",
+          "text": "Accept the praise and amplify it — talk about the achievement enthusiastically",
+          "quadrant_weight": {"magnifier": 1.0}
+        },
+        {
+          "key": "c",
+          "text": "Accept it graciously but don't make a big deal about it either way",
+          "quadrant_weight": {"conduit": 1.0}
+        },
+        {
+          "key": "d",
+          "text": "Enjoy the recognition privately and hold onto that good feeling for yourself",
+          "quadrant_weight": {"absorber": 1.0}
+        }
+      ],
+      "follow_up_prompt": "How did that feel? Did you share it with anyone afterward?",
+      "order": 2,
+      "tags": ["professional", "esteem"],
+      "source": "transmutarianism-v13-s4"
+    },
+    {
+      "id": "sc_safety_01",
+      "type": "scenario",
+      "dimension": "Transmutation Capacity",
+      "sub_dimension": "Deprivation Filtering",
+      "maslow_level": "safety",
+      "narrative": "You're having a difficult day — a series of small frustrations have been building up. You come home and your partner or roommate cheerfully asks you about your day.",
+      "choices": [
+        {
+          "key": "a",
+          "text": "Take a breath, acknowledge your bad day honestly but without dumping the frustration on them",
+          "quadrant_weight": {"transmuter": 1.0}
+        },
+        {
+          "key": "b",
+          "text": "Vent about everything that went wrong, amplifying each frustration as you retell it",
+          "quadrant_weight": {"magnifier": 1.0}
+        },
+        {
+          "key": "c",
+          "text": "Say 'fine' and keep the frustration to yourself",
+          "quadrant_weight": {"conduit": 1.0}
+        },
+        {
+          "key": "d",
+          "text": "Snap at them — their cheerfulness feels tone-deaf given your day",
+          "quadrant_weight": {"extractor": 1.0}
+        }
+      ],
+      "follow_up_prompt": "What usually happens when you bring stress home? How does it affect the people around you?",
+      "order": 3,
+      "tags": ["personal", "safety"],
+      "source": "transmutarianism-v13-s4"
+    },
+    {
+      "id": "sc_selfact_01",
+      "type": "scenario",
+      "dimension": "Transmutation Capacity",
+      "sub_dimension": "Amplification Awareness",
+      "maslow_level": "self-actualization",
+      "narrative": "A friend shares a creative project they've been working on. It's clearly meaningful to them, though you can see areas where it could be improved.",
+      "choices": [
+        {
+          "key": "a",
+          "text": "Appreciate what's working, then offer thoughtful feedback that helps them grow",
+          "quadrant_weight": {"transmuter": 1.0}
+        },
+        {
+          "key": "b",
+          "text": "Get genuinely excited about it and share it with others to amplify their work",
+          "quadrant_weight": {"magnifier": 1.0}
+        },
+        {
+          "key": "c",
+          "text": "Say it looks nice and move on to another topic",
+          "quadrant_weight": {"conduit": 1.0}
+        },
+        {
+          "key": "d",
+          "text": "Point out the flaws — they need honest feedback, and sugarcoating doesn't help",
+          "quadrant_weight": {"extractor": 1.0}
+        }
+      ],
+      "follow_up_prompt": "How do you typically respond when someone shares something they're proud of?",
+      "order": 4,
+      "tags": ["interpersonal", "self-actualization"],
+      "source": "transmutarianism-v13-s4"
+    },
+    {
+      "id": "sc_physio_01",
+      "type": "scenario",
+      "dimension": "Transmutation Capacity",
+      "sub_dimension": "Absorption Patterns",
+      "maslow_level": "physiological",
+      "narrative": "You're at a family dinner where a heated argument breaks out between two relatives. The tension is palpable and everyone at the table can feel it.",
+      "choices": [
+        {
+          "key": "a",
+          "text": "Calmly redirect the conversation, absorbing the tension and transforming the energy at the table",
+          "quadrant_weight": {"transmuter": 1.0}
+        },
+        {
+          "key": "b",
+          "text": "Absorb the tension silently — you feel it physically but keep it to yourself",
+          "quadrant_weight": {"absorber": 1.0}
+        },
+        {
+          "key": "c",
+          "text": "Stay neutral and wait for it to blow over — it's not your fight",
+          "quadrant_weight": {"conduit": 1.0}
+        },
+        {
+          "key": "d",
+          "text": "Jump in and escalate — if they're going to argue, at least get to the real issue",
+          "quadrant_weight": {"magnifier": 1.0}
+        }
+      ],
+      "follow_up_prompt": "Think of the last family or group conflict you witnessed. What role did you play?",
+      "order": 5,
+      "tags": ["family", "physiological"],
+      "source": "transmutarianism-v13-s4"
+    }
+  ]
+}
