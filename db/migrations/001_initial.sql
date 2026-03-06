@@ -17,23 +17,31 @@ CREATE TABLE users (
 
 -- Assessment state
 CREATE TABLE assessment_state (
-    id              TEXT PRIMARY KEY,
-    user_id         TEXT NOT NULL REFERENCES users(id),
-    assessment_type TEXT NOT NULL,
-    responses       JSON,
-    scenario_responses JSON,
-    completed_at    TIMESTAMP,
-    created_at      TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+    id                    TEXT PRIMARY KEY,
+    user_id               TEXT NOT NULL REFERENCES users(id),
+    session_id            TEXT REFERENCES adk_sessions(session_id),
+    responses             JSON,
+    scenario_responses    JSON,
+    current_phase         TEXT DEFAULT 'assessment',
+    completed_dimensions  JSON,
+    completed_at          TIMESTAMP,
+    created_at            TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    updated_at            TIMESTAMP,
+    UNIQUE(user_id, session_id)
 );
+
+CREATE INDEX idx_assessment_state_user_id ON assessment_state(user_id);
+CREATE INDEX idx_assessment_state_session_id ON assessment_state(session_id);
 
 -- Profile snapshots
 CREATE TABLE profile_snapshots (
     id                  TEXT PRIMARY KEY,
     user_id             TEXT NOT NULL REFERENCES users(id),
-    assessment_id       TEXT REFERENCES assessment_state(id),
-    snapshot            JSON,
-    interpretation      JSON,
+    session_id          TEXT REFERENCES adk_sessions(session_id),
+    scores              JSON,
+    quadrant_placement  JSON,
     spider_chart        BLOB,
+    interpretation      TEXT,
     previous_snapshot_id TEXT REFERENCES profile_snapshots(id),
     created_at          TIMESTAMP DEFAULT CURRENT_TIMESTAMP
 );
@@ -91,6 +99,7 @@ CREATE TABLE check_in_log (
 CREATE TABLE safety_log (
     id          TEXT PRIMARY KEY,
     user_id     TEXT NOT NULL REFERENCES users(id),
+    session_id  TEXT REFERENCES adk_sessions(session_id),
     reason      TEXT,
     created_at  TIMESTAMP DEFAULT CURRENT_TIMESTAMP
 );
