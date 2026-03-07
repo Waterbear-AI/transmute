@@ -1114,7 +1114,44 @@ def generate_comparison_snapshot(
     prev_q = previous_quadrant.get("quadrant", "")
     quadrant_shifted = curr_q != prev_q
 
-    return {
+    # Flow data deltas
+    flow_deltas = None
+    current_flow_raw = current["flow_data"]
+    previous_flow_raw = previous["flow_data"]
+    if current_flow_raw and previous_flow_raw:
+        from models.moral_profile import MoralProfile
+
+        current_flow = MoralProfile.model_validate_json(current_flow_raw)
+        previous_flow = MoralProfile.model_validate_json(previous_flow_raw)
+
+        moral_work_deltas = [
+            round(c - p, 4)
+            for c, p in zip(current_flow.moral_work, previous_flow.moral_work)
+        ]
+        flow_deltas = {
+            "moral_work": {
+                "previous": previous_flow.moral_work,
+                "current": current_flow.moral_work,
+                "delta": moral_work_deltas,
+            },
+            "weighted_total": {
+                "previous": previous_flow.weighted_total,
+                "current": current_flow.weighted_total,
+                "delta": round(current_flow.weighted_total - previous_flow.weighted_total, 4),
+            },
+            "moral_capital": {
+                "previous": previous_flow.moral_capital,
+                "current": current_flow.moral_capital,
+                "delta": round(current_flow.moral_capital - previous_flow.moral_capital, 4),
+            },
+            "moral_debt": {
+                "previous": previous_flow.moral_debt,
+                "current": current_flow.moral_debt,
+                "delta": round(current_flow.moral_debt - previous_flow.moral_debt, 4),
+            },
+        }
+
+    result = {
         "current_snapshot_id": current["id"],
         "previous_snapshot_id": previous_snapshot_id,
         "deltas": deltas,
@@ -1126,6 +1163,9 @@ def generate_comparison_snapshot(
         "current_created_at": current["created_at"],
         "previous_created_at": previous["created_at"],
     }
+    if flow_deltas:
+        result["flow_deltas"] = flow_deltas
+    return result
 
 
 def evaluate_graduation_readiness(user_id: str) -> dict[str, Any]:
