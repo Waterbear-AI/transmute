@@ -154,6 +154,41 @@ class TestTransmutationSettings:
 
 # --- Flow Engine Tests ---
 
+# --- Health Endpoint Tests ---
+
+class TestHealthEndpoint:
+    def test_health_returns_ok_when_db_accessible(self, api_client):
+        resp = api_client.get("/health")
+        assert resp.status_code == 200
+        data = resp.json()
+        assert data["status"] == "ok"
+        assert data["db"] == "connected"
+
+    def test_readiness_returns_ok(self, api_client):
+        resp = api_client.get("/readiness")
+        assert resp.status_code == 200
+        assert resp.json()["status"] == "ok"
+
+    def test_health_returns_503_when_db_unreachable(self, api_client, monkeypatch):
+        def broken_session():
+            raise Exception("DB unreachable")
+
+        # Make get_db_session raise an exception
+        from contextlib import contextmanager
+
+        @contextmanager
+        def broken_context():
+            raise Exception("DB unreachable")
+            yield  # noqa: unreachable
+
+        monkeypatch.setattr("api.health.get_db_session", broken_context)
+        resp = api_client.get("/health")
+        assert resp.status_code == 503
+        data = resp.json()
+        assert data["status"] == "unhealthy"
+        assert data["db"] == "disconnected"
+
+
 class TestComputeFlowsPerLevel:
     def _make_scenarios(self):
         return [

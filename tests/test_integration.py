@@ -134,6 +134,20 @@ class TestLogout:
         assert resp.status_code == 200
 
 
+class TestHealthEndpoints:
+    def test_health_returns_ok(self):
+        resp = client.get("/health")
+        assert resp.status_code == 200
+        data = resp.json()
+        assert data["status"] == "ok"
+        assert data["db"] == "connected"
+
+    def test_readiness_returns_ok(self):
+        resp = client.get("/readiness")
+        assert resp.status_code == 200
+        assert resp.json()["status"] == "ok"
+
+
 class TestMigrations:
     def test_all_tables_created(self):
         import sqlite3
