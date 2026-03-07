@@ -70,6 +70,7 @@ const App = (() => {
             }
         } catch (err) {
             console.error('[App] Init failed:', err.message);
+            Toast.show('Failed to load application data', 'error');
         }
     }
 
@@ -86,6 +87,7 @@ const App = (() => {
     }
 
     async function init() {
+        Toast.init();
         Auth.setAuthChangeCallback(handleAuthChange);
         const user = await Auth.checkSession();
         if (user) {

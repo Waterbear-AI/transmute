@@ -63,7 +63,11 @@ const Chat = (() => {
 
             if (!res.ok) {
                 const err = await res.json().catch(() => ({}));
-                _appendSystemMessage('Error: ' + (err.detail || 'Failed to send message'));
+                const errMsg = err.detail || 'Failed to send message';
+                _appendSystemMessage('Error: ' + errMsg);
+                Toast.show(errMsg, 'error', {
+                    onRetry: () => sendMessage(sessionId, message)
+                });
                 return;
             }
 
@@ -71,6 +75,9 @@ const Chat = (() => {
         } catch (err) {
             if (err.name !== 'AbortError') {
                 _appendSystemMessage('Connection error: ' + err.message);
+                Toast.show('Connection error: ' + err.message, 'error', {
+                    onRetry: () => sendMessage(sessionId, message)
+                });
             }
         } finally {
             _abortController = null;
@@ -166,6 +173,7 @@ const Chat = (() => {
 
             case 'error':
                 _appendSystemMessage('Error: ' + (data.message || 'Unknown error'));
+                Toast.show(data.message || 'Unknown error', 'error');
                 break;
 
             case 'session.cost':
@@ -177,6 +185,7 @@ const Chat = (() => {
                 if (typeof Results !== 'undefined') {
                     Results.handlePhaseTransition(data.from, data.to);
                 }
+                Toast.show('Entering ' + data.to.charAt(0).toUpperCase() + data.to.slice(1) + ' phase', 'success');
                 break;
 
             // Domain events — dispatch to widget creators or Results panel
