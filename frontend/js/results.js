@@ -446,34 +446,154 @@ const Results = (() => {
                 Sanitize.setText(dateEl, 'Last check-in: ' + new Date(data.latest_created_at).toLocaleDateString());
                 el.appendChild(dateEl);
             }
-            return;
         }
 
-        // SSE comparison data (deltas)
+        // Side-by-side spider chart comparison
+        const prev = data.previous_snapshot || data.previous;
+        const curr = data.current_snapshot || data.current;
+        if (prev || curr) {
+            _renderComparisonCharts(el, prev, curr);
+        }
+
+        // Delta indicators
         if (data.deltas) {
-            const deltaHeader = document.createElement('h4');
-            deltaHeader.style.marginTop = '12px';
-            Sanitize.setText(deltaHeader, 'Score Changes');
-            el.appendChild(deltaHeader);
-
-            for (const [dim, delta] of Object.entries(data.deltas)) {
-                const row = document.createElement('div');
-                row.style.margin = '6px 0';
-                const arrow = delta.direction === 'up' ? '\u2191' : delta.direction === 'down' ? '\u2193' : '\u2194';
-                const color = delta.direction === 'up' ? 'var(--color-success, #4caf50)' : delta.direction === 'down' ? 'var(--color-warning)' : 'inherit';
-                row.style.color = color;
-                Sanitize.setText(row, dim + ': ' + arrow + ' ' + (delta.delta > 0 ? '+' : '') + delta.delta + '%');
-                el.appendChild(row);
-            }
+            _renderComparisonDeltas(el, data.deltas);
         }
 
+        // Quadrant shift indicator
         if (data.quadrant_shift && data.quadrant_shift.shifted) {
             const shiftEl = document.createElement('div');
-            shiftEl.style.margin = '12px 0';
-            shiftEl.style.fontWeight = '600';
+            shiftEl.className = 'comparison-shift';
             Sanitize.setText(shiftEl, 'Quadrant shift: ' + (data.quadrant_shift.from || '?') + ' \u2192 ' + (data.quadrant_shift.to || '?'));
             el.appendChild(shiftEl);
         }
+    }
+
+    function _renderComparisonCharts(el, prev, curr) {
+        const grid = document.createElement('div');
+        grid.className = 'comparison-grid';
+
+        // Previous panel
+        const prevPanel = document.createElement('div');
+        prevPanel.className = 'comparison-panel';
+        const prevTitle = document.createElement('div');
+        prevTitle.className = 'comparison-panel__title';
+        Sanitize.setText(prevTitle, 'Previous');
+        prevPanel.appendChild(prevTitle);
+
+        if (prev && prev.spider_data && prev.spider_data.image_base64) {
+            const img = document.createElement('img');
+            img.src = 'data:image/png;base64,' + prev.spider_data.image_base64;
+            img.alt = 'Previous spider chart';
+            prevPanel.appendChild(img);
+        }
+        if (prev && prev.quadrant) {
+            const q = document.createElement('div');
+            q.className = 'comparison-panel__quadrant';
+            Sanitize.setText(q, prev.quadrant);
+            prevPanel.appendChild(q);
+        }
+        if (prev && prev.weighted_total !== undefined) {
+            const w = document.createElement('div');
+            w.style.color = 'var(--color-text-muted)';
+            w.style.fontSize = '13px';
+            w.style.marginTop = '4px';
+            Sanitize.setText(w, 'W: ' + Number(prev.weighted_total).toFixed(1));
+            prevPanel.appendChild(w);
+        }
+
+        grid.appendChild(prevPanel);
+
+        // Current panel
+        const currPanel = document.createElement('div');
+        currPanel.className = 'comparison-panel';
+        const currTitle = document.createElement('div');
+        currTitle.className = 'comparison-panel__title';
+        Sanitize.setText(currTitle, 'Current');
+        currPanel.appendChild(currTitle);
+
+        if (curr && curr.spider_data && curr.spider_data.image_base64) {
+            const img = document.createElement('img');
+            img.src = 'data:image/png;base64,' + curr.spider_data.image_base64;
+            img.alt = 'Current spider chart';
+            currPanel.appendChild(img);
+        }
+        if (curr && curr.quadrant) {
+            const q = document.createElement('div');
+            q.className = 'comparison-panel__quadrant';
+            Sanitize.setText(q, curr.quadrant);
+            currPanel.appendChild(q);
+        }
+        if (curr && curr.weighted_total !== undefined) {
+            const w = document.createElement('div');
+            w.style.color = 'var(--color-text-muted)';
+            w.style.fontSize = '13px';
+            w.style.marginTop = '4px';
+            Sanitize.setText(w, 'W: ' + Number(curr.weighted_total).toFixed(1));
+            currPanel.appendChild(w);
+
+            // Delta from previous
+            if (prev && prev.weighted_total !== undefined) {
+                const diff = curr.weighted_total - prev.weighted_total;
+                const deltaEl = document.createElement('div');
+                deltaEl.style.marginTop = '4px';
+                deltaEl.style.fontWeight = '600';
+                if (diff > 0) {
+                    deltaEl.className = 'comparison-delta__value--up';
+                    Sanitize.setText(deltaEl, '\u25B2 +' + diff.toFixed(1));
+                } else if (diff < 0) {
+                    deltaEl.className = 'comparison-delta__value--down';
+                    Sanitize.setText(deltaEl, '\u25BC ' + diff.toFixed(1));
+                } else {
+                    deltaEl.className = 'comparison-delta__value--neutral';
+                    Sanitize.setText(deltaEl, '\u2014 0.0');
+                }
+                currPanel.appendChild(deltaEl);
+            }
+        }
+
+        grid.appendChild(currPanel);
+        el.appendChild(grid);
+    }
+
+    function _renderComparisonDeltas(el, deltas) {
+        const deltaHeader = document.createElement('h4');
+        deltaHeader.style.marginTop = '12px';
+        Sanitize.setText(deltaHeader, 'Score Changes');
+        el.appendChild(deltaHeader);
+
+        const container = document.createElement('div');
+        container.className = 'comparison-deltas';
+
+        for (const [dim, delta] of Object.entries(deltas)) {
+            const row = document.createElement('div');
+            row.className = 'comparison-delta';
+
+            const label = document.createElement('span');
+            label.className = 'comparison-delta__label';
+            Sanitize.setText(label, dim);
+            row.appendChild(label);
+
+            const value = document.createElement('span');
+            const d = typeof delta === 'object' ? delta.delta : delta;
+            const dir = typeof delta === 'object' ? delta.direction : (d > 0 ? 'up' : d < 0 ? 'down' : 'neutral');
+
+            if (dir === 'up') {
+                value.className = 'comparison-delta__value comparison-delta__value--up';
+                Sanitize.setText(value, '\u25B2 +' + Math.abs(d) + '%');
+            } else if (dir === 'down') {
+                value.className = 'comparison-delta__value comparison-delta__value--down';
+                Sanitize.setText(value, '\u25BC -' + Math.abs(d) + '%');
+            } else {
+                value.className = 'comparison-delta__value comparison-delta__value--neutral';
+                Sanitize.setText(value, '\u2014 0%');
+            }
+            row.appendChild(value);
+
+            container.appendChild(row);
+        }
+
+        el.appendChild(container);
     }
 
     function _renderGraduation(el) {

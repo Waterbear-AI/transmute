@@ -836,6 +836,97 @@ body {
     z-index: 10;
 }
 
+/* ── Comparison View ──────────────────────── */
+
+.comparison-grid {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 16px;
+    margin: 16px 0;
+}
+
+.comparison-panel {
+    background: var(--color-surface);
+    border: 1px solid var(--color-border);
+    border-radius: 8px;
+    padding: 12px;
+    text-align: center;
+}
+
+.comparison-panel__title {
+    font-size: 14px;
+    font-weight: 600;
+    color: var(--color-text-muted);
+    margin-bottom: 8px;
+    text-transform: uppercase;
+    letter-spacing: 0.05em;
+}
+
+.comparison-panel__quadrant {
+    font-size: 16px;
+    font-weight: 600;
+    margin-top: 8px;
+}
+
+.comparison-panel img {
+    max-width: 100%;
+    border-radius: 4px;
+}
+
+.comparison-deltas {
+    margin: 16px 0;
+}
+
+.comparison-delta {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    padding: 8px 12px;
+    border-bottom: 1px solid var(--color-border);
+}
+
+.comparison-delta:last-child {
+    border-bottom: none;
+}
+
+.comparison-delta__label {
+    font-size: 14px;
+    color: var(--color-text);
+}
+
+.comparison-delta__value {
+    font-size: 14px;
+    font-weight: 600;
+}
+
+.comparison-delta__value--up {
+    color: var(--color-success);
+}
+
+.comparison-delta__value--down {
+    color: var(--color-error);
+}
+
+.comparison-delta__value--neutral {
+    color: var(--color-text-muted);
+}
+
+.comparison-shift {
+    margin: 16px 0;
+    padding: 12px;
+    background: var(--color-surface);
+    border: 1px solid var(--color-border);
+    border-radius: 8px;
+    font-weight: 600;
+    text-align: center;
+}
+
+@media (max-width: 480px) {
+    .comparison-grid {
+        grid-template-columns: 1fr;
+    }
+}
+
 /* ── Toast Notifications ───────────────────── */
 
 .toast-container {
