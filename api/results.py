@@ -36,12 +36,42 @@ class AssessmentSummary(BaseModel):
     current_phase: Optional[str] = None
 
 
+class EducationProgressResponse(BaseModel):
+    exists: bool
+    progress: Optional[dict[str, Any]] = None
+    summary: Optional[dict[str, Any]] = None
+
+
+class DevelopmentResponse(BaseModel):
+    has_roadmap: bool
+    roadmap: Optional[dict[str, Any]] = None
+    practice_count: int = 0
+    roadmap_created_at: Optional[str] = None
+
+
+class GraduationResponse(BaseModel):
+    exists: bool
+    pattern_narrative: Optional[str] = None
+    graduation_indicators: Optional[dict[str, Any]] = None
+    created_at: Optional[str] = None
+
+
+class CheckInResponse(BaseModel):
+    count: int = 0
+    latest_regression: Optional[bool] = None
+    latest_created_at: Optional[str] = None
+
+
 class ResultsResponse(BaseModel):
     user_id: str
     current_phase: Optional[str] = None
     assessment: AssessmentSummary
     profiles: list[ProfileSnapshotResponse]
     latest_profile: Optional[ProfileSnapshotResponse] = None
+    education: Optional[EducationProgressResponse] = None
+    development: Optional[DevelopmentResponse] = None
+    graduation: Optional[GraduationResponse] = None
+    check_ins: Optional[CheckInResponse] = None
 
 
 @router.get("/{target_user_id}", response_model=ResultsResponse)
@@ -105,10 +135,89 @@ def get_results(
                 created_at=row["created_at"],
             ))
 
+        # Get education progress
+        edu_row = conn.execute(
+            "SELECT progress FROM education_progress WHERE user_id = ?",
+            (user_id,),
+        ).fetchone()
+
+        if edu_row:
+            edu_progress = json.loads(edu_row["progress"] or "{}")
+            total_cats = 0
+            completed_cats = 0
+            for dim, cats in edu_progress.items():
+                for cat, data in cats.items():
+                    total_cats += 1
+                    if data.get("understanding_score", 0) >= 70:
+                        completed_cats += 1
+            education = EducationProgressResponse(
+                exists=True,
+                progress=edu_progress,
+                summary={
+                    "total_categories": total_cats,
+                    "completed_categories": completed_cats,
+                    "completion_pct": round(completed_cats / total_cats * 100, 1) if total_cats > 0 else 0,
+                },
+            )
+        else:
+            education = EducationProgressResponse(exists=False)
+
+        # Get development data
+        roadmap_row = conn.execute(
+            "SELECT roadmap, created_at FROM development_roadmap WHERE user_id = ? ORDER BY created_at DESC LIMIT 1",
+            (user_id,),
+        ).fetchone()
+
+        practice_count_row = conn.execute(
+            "SELECT COUNT(*) as cnt FROM practice_journal WHERE user_id = ?",
+            (user_id,),
+        ).fetchone()
+
+        development = DevelopmentResponse(
+            has_roadmap=roadmap_row is not None,
+            roadmap=json.loads(roadmap_row["roadmap"]) if roadmap_row else None,
+            practice_count=practice_count_row["cnt"] if practice_count_row else 0,
+            roadmap_created_at=roadmap_row["created_at"] if roadmap_row else None,
+        )
+
+        # Get graduation record
+        grad_row = conn.execute(
+            "SELECT pattern_narrative, graduation_indicators, created_at FROM graduation_record WHERE user_id = ? ORDER BY created_at DESC LIMIT 1",
+            (user_id,),
+        ).fetchone()
+
+        graduation = GraduationResponse(
+            exists=grad_row is not None,
+            pattern_narrative=grad_row["pattern_narrative"] if grad_row else None,
+            graduation_indicators=json.loads(grad_row["graduation_indicators"]) if grad_row else None,
+            created_at=grad_row["created_at"] if grad_row else None,
+        )
+
+        # Get check-in logs
+        checkin_count = conn.execute(
+            "SELECT COUNT(*) as cnt FROM check_in_log WHERE user_id = ?",
+            (user_id,),
+        ).fetchone()
+
+        latest_checkin = conn.execute(
+            "SELECT regression_detected, created_at FROM check_in_log WHERE user_id = ? ORDER BY created_at DESC LIMIT 1",
+            (user_id,),
+        ).fetchone()
+
+        check_ins = CheckInResponse(
+            count=checkin_count["cnt"] if checkin_count else 0,
+            latest_regression=latest_checkin["regression_detected"] if latest_checkin else None,
+            latest_created_at=latest_checkin["created_at"] if latest_checkin else None,
+        )
+
     return ResultsResponse(
         user_id=user_id,
         current_phase=current_phase,
         assessment=assessment,
         profiles=profiles,
         latest_profile=profiles[0] if profiles else None,
+        education=education,
+        development=development,
+        graduation=graduation,
+        check_ins=check_ins,
     )
