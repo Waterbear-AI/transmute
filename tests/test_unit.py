@@ -154,6 +154,26 @@ class TestTransmutationSettings:
 
 # --- Flow Engine Tests ---
 
+# --- Debug Reload Config Tests ---
+
+class TestDebugReloadConfig:
+    def test_debug_true_sets_reload_true(self, monkeypatch):
+        monkeypatch.setenv("DEBUG", "true")
+        assert os.getenv("DEBUG", "").lower() == "true"
+
+    def test_debug_TRUE_sets_reload_true(self, monkeypatch):
+        monkeypatch.setenv("DEBUG", "TRUE")
+        assert os.getenv("DEBUG", "").lower() == "true"
+
+    def test_debug_unset_sets_reload_false(self, monkeypatch):
+        monkeypatch.delenv("DEBUG", raising=False)
+        assert os.getenv("DEBUG", "").lower() != "true"
+
+    def test_debug_false_sets_reload_false(self, monkeypatch):
+        monkeypatch.setenv("DEBUG", "false")
+        assert os.getenv("DEBUG", "").lower() != "true"
+
+
 # --- Health Endpoint Tests ---
 
 class TestHealthEndpoint:

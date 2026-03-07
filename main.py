@@ -1,4 +1,5 @@
 import logging
+import os
 import uuid
 from contextlib import asynccontextmanager
 from pathlib import Path
@@ -63,4 +64,5 @@ if FRONTEND_DIR.exists():
 
 
 if __name__ == "__main__":
-    uvicorn.run("main:app", host="0.0.0.0", port=54718, reload=True)
+    debug = os.getenv("DEBUG", "").lower() == "true"
+    uvicorn.run("main:app", host="0.0.0.0", port=54718, reload=debug)
