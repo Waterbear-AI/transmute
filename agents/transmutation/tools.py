@@ -537,3 +537,138 @@ def save_profile_snapshot(user_id: str, interpretation: str) -> dict[str, Any]:
         "quadrant": cached["quadrant"],
         "interpretation": interpretation,
     }
+
+
+# ── Education Agent tools ──────────────────────────────────────────────
+
+
+def get_education_progress(user_id: str) -> dict[str, Any]:
+    """Retrieve education progress for a user.
+
+    Returns per-dimension, per-category progress including understanding
+    scores, questions answered/correct, and reflection status.
+    """
+    with get_db_session() as conn:
+        row = conn.execute(
+            "SELECT progress FROM education_progress WHERE user_id = ?",
+            (user_id,),
+        ).fetchone()
+
+    if not row:
+        return {"exists": False, "progress": {}}
+
+    progress = json.loads(row["progress"] or "{}")
+
+    # Compute summary stats
+    total_categories = 0
+    completed_categories = 0
+    for dim, categories in progress.items():
+        for cat, data in categories.items():
+            total_categories += 1
+            if data.get("understanding_score", 0) >= 70:
+                completed_categories += 1
+
+    return {
+        "exists": True,
+        "progress": progress,
+        "summary": {
+            "total_categories": total_categories,
+            "completed_categories": completed_categories,
+            "completion_pct": round(
+                completed_categories / total_categories * 100, 1
+            )
+            if total_categories > 0
+            else 0,
+        },
+    }
+
+
+def record_comprehension_answer(
+    user_id: str,
+    dimension: str,
+    category: str,
+    question_id: str,
+    selected_option: str,
+) -> dict[str, Any]:
+    """Record a comprehension check answer and update education progress.
+
+    Looks up the correct answer from comprehension_checks.json,
+    updates the education_progress JSON, and returns feedback.
+    """
+    qb = get_question_bank()
+    question = qb.get_comprehension_question_by_id(question_id)
+    if not question:
+        return {"error": f"Comprehension question not found: {question_id}"}
+
+    correct = selected_option == question["correct_option"]
+
+    with get_db_session() as conn:
+        row = conn.execute(
+            "SELECT progress FROM education_progress WHERE user_id = ?",
+            (user_id,),
+        ).fetchone()
+
+        if row:
+            progress = json.loads(row["progress"] or "{}")
+        else:
+            progress = {}
+
+        # Initialize dimension and category if needed
+        if dimension not in progress:
+            progress[dimension] = {}
+        if category not in progress[dimension]:
+            progress[dimension][category] = {
+                "understanding_score": 0,
+                "questions_answered": [],
+                "questions_correct": [],
+                "last_discussed": None,
+                "reflection_given": False,
+            }
+
+        cat_data = progress[dimension][category]
+
+        # Record the answer (avoid duplicates)
+        if question_id not in cat_data["questions_answered"]:
+            cat_data["questions_answered"].append(question_id)
+            if correct:
+                cat_data["questions_correct"].append(question_id)
+
+        # Recompute understanding score
+        answered_count = len(cat_data["questions_answered"])
+        correct_count = len(cat_data["questions_correct"])
+        cat_data["understanding_score"] = round(
+            correct_count / answered_count * 100
+        ) if answered_count > 0 else 0
+        cat_data["last_discussed"] = datetime.utcnow().isoformat()
+
+        # Upsert education_progress
+        if row:
+            conn.execute(
+                "UPDATE education_progress SET progress = ? WHERE user_id = ?",
+                (json.dumps(progress), user_id),
+            )
+        else:
+            conn.execute(
+                "INSERT INTO education_progress (user_id, progress) VALUES (?, ?)",
+                (user_id, json.dumps(progress)),
+            )
+
+    # Count categories covered for this dimension
+    dim_progress = progress.get(dimension, {})
+    qb_categories = qb.get_comprehension_categories(dimension)
+    categories_covered = len(
+        [c for c in qb_categories if c in dim_progress]
+    )
+
+    return {
+        "event_type": "education.comprehension",
+        "correct": correct,
+        "explanation": question.get("explanation", ""),
+        "reflection_prompt": question.get("reflection_prompt"),
+        "score": cat_data["understanding_score"],
+        "dimension": dimension,
+        "category": category,
+        "question_id": question_id,
+        "categories_covered": categories_covered,
+        "categories_total": len(qb_categories),
+    }
