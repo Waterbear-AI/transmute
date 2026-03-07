@@ -134,6 +134,37 @@ class TestLogout:
         assert resp.status_code == 200
 
 
+class TestGlobalExceptionHandler:
+    def test_unhandled_exception_returns_structured_error(self):
+        from fastapi import APIRouter
+        error_router = APIRouter()
+
+        @error_router.get("/test-error")
+        def trigger_error():
+            raise RuntimeError("Unexpected failure")
+
+        # Insert route before the catch-all static files mount
+        app.include_router(error_router)
+        route = app.routes.pop()
+        app.routes.insert(0, route)
+        try:
+            # Must disable raise_server_exceptions to get the 500 response
+            error_client = TestClient(app, raise_server_exceptions=False)
+            resp = error_client.get("/test-error")
+            assert resp.status_code == 500
+            data = resp.json()
+            assert data["error"] == "Internal server error"
+            assert "request_id" in data
+            # Verify request_id is a valid UUID
+            import uuid
+            uuid.UUID(data["request_id"])
+            # Verify no stack trace in response
+            assert "Traceback" not in resp.text
+            assert "RuntimeError" not in resp.text
+        finally:
+            app.routes[:] = [r for r in app.routes if not (hasattr(r, 'path') and r.path == '/test-error')]
+
+
 class TestHealthEndpoints:
     def test_health_returns_ok(self):
         resp = client.get("/health")

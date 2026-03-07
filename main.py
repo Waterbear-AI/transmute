@@ -1,4 +1,5 @@
 import logging
+import uuid
 from contextlib import asynccontextmanager
 from pathlib import Path
 
@@ -35,6 +36,18 @@ async def lifespan(app: FastAPI):
 app = FastAPI(title="Transmutation Engine", lifespan=lifespan)
 app.state.limiter = limiter
 app.add_exception_handler(RateLimitExceeded, _rate_limit_exceeded_handler)
+
+
+async def universal_exception_handler(request: Request, exc: Exception) -> JSONResponse:
+    request_id = str(uuid.uuid4())
+    logger.error("Unhandled exception [request_id=%s]: %s", request_id, exc, exc_info=True)
+    return JSONResponse(
+        status_code=500,
+        content={"error": "Internal server error", "request_id": request_id},
+    )
+
+
+app.add_exception_handler(Exception, universal_exception_handler)
 
 # Include API routers
 app.include_router(health_router)
