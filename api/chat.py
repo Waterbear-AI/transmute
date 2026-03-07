@@ -7,7 +7,7 @@ import json
 import logging
 from typing import AsyncGenerator
 
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, Depends, HTTPException, Request
 from fastapi.responses import StreamingResponse
 from google.genai import types as genai_types
 from pydantic import BaseModel
@@ -16,6 +16,7 @@ from api.auth import get_current_user_id
 from agents.transmutation.agent import create_transmutation_agent
 from agents.transmutation.session_service import SqliteSessionService
 from config import get_settings
+from rate_limit import limiter
 from google.adk.models import LLMRegistry
 from google.adk.models.lite_llm import LiteLlm
 from google.adk.runners import Runner
@@ -177,7 +178,9 @@ def _estimate_cost(input_tokens: int, output_tokens: int) -> float:
 
 
 @router.post("/{session_id}")
+@limiter.limit("30/minute")
 async def chat(
+    request: Request,
     session_id: str,
     body: ChatRequest,
     user_id: str = Depends(get_current_user_id),

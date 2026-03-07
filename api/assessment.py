@@ -10,11 +10,12 @@ import uuid
 from datetime import datetime
 from typing import Any, Optional
 
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, Depends, HTTPException, Request
 from pydantic import BaseModel
 
 from api.auth import get_current_user_id
 from db.database import get_db_session
+from rate_limit import limiter
 from agents.transmutation.question_bank import get_question_bank
 from agents.transmutation.tools import _compute_progress
 
@@ -73,7 +74,9 @@ def get_state(user_id: str = Depends(get_current_user_id)):
 
 
 @router.post("/responses", response_model=ResponseSaveResult)
+@limiter.limit("60/minute")
 def save_response(
+    request: Request,
     body: SingleResponseRequest,
     user_id: str = Depends(get_current_user_id),
 ):
