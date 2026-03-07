@@ -13,6 +13,7 @@ from slowapi.errors import RateLimitExceeded
 
 from api.auth import router as auth_router
 from api.chat import router as chat_router
+from api.export import router as export_router
 from api.health import router as health_router
 from api.sessions import router as sessions_router
 from api.assessment import router as assessment_router
@@ -54,6 +55,7 @@ app.add_exception_handler(Exception, universal_exception_handler)
 app.include_router(health_router)
 app.include_router(auth_router)
 app.include_router(chat_router)
+app.include_router(export_router)
 app.include_router(sessions_router)
 app.include_router(assessment_router)
 app.include_router(results_router)

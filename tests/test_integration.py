@@ -179,6 +179,39 @@ class TestHealthEndpoints:
         assert resp.json()["status"] == "ok"
 
 
+class TestExportEndpoint:
+    def test_export_returns_user_data_with_content_disposition(self):
+        # Register a user (authenticated via cookie)
+        reg = client.post("/auth/register", json={
+            "name": "Export User",
+            "email": "export@example.com",
+            "password": "password123",
+        })
+        cookies = reg.cookies
+        user_id = reg.json()["user_id"]
+
+        resp = client.get("/api/export", cookies=cookies)
+        assert resp.status_code == 200
+        assert "attachment" in resp.headers.get("content-disposition", "")
+        assert "transmute-export.json" in resp.headers.get("content-disposition", "")
+
+        data = resp.json()
+        # Should have user data
+        assert "users" in data
+        assert len(data["users"]) == 1
+        assert data["users"][0]["id"] == user_id
+        assert data["users"][0]["name"] == "Export User"
+
+        # Should have empty arrays for tables with no data yet
+        assert "assessment_state" in data
+        assert isinstance(data["assessment_state"], list)
+
+    def test_export_without_auth_returns_401(self):
+        fresh_client = TestClient(app)
+        resp = fresh_client.get("/api/export")
+        assert resp.status_code == 401
+
+
 class TestMigrations:
     def test_all_tables_created(self):
         import sqlite3
