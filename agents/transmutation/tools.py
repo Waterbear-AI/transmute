@@ -1210,3 +1210,72 @@ def save_graduation_record(
         "pattern_narrative": pattern_narrative,
         "graduation_indicators": graduation_indicators,
     }
+
+
+# ── Check-in Agent tools ───────────────────────────────────────────────
+
+
+def get_graduation_record(user_id: str) -> dict[str, Any]:
+    """Retrieve the graduation record for a user.
+
+    Returns graduation data including the final snapshot ID (used as
+    comparison baseline for check-in assessments).
+    """
+    with get_db_session() as conn:
+        row = conn.execute(
+            "SELECT * FROM graduation_record WHERE user_id = ? ORDER BY created_at DESC LIMIT 1",
+            (user_id,),
+        ).fetchone()
+
+    if not row:
+        return {"exists": False}
+
+    return {
+        "exists": True,
+        "id": row["id"],
+        "final_snapshot_id": row["final_snapshot_id"],
+        "initial_snapshot_id": row["initial_snapshot_id"],
+        "practice_map": json.loads(row["practice_map"] or "{}"),
+        "pattern_narrative": row["pattern_narrative"],
+        "graduation_indicators": json.loads(row["graduation_indicators"] or "{}"),
+        "created_at": row["created_at"],
+    }
+
+
+def save_check_in_log(
+    user_id: str,
+    snapshot_id: str,
+    graduation_snapshot_id: str,
+    regression_detected: bool,
+    re_entered_development: bool = False,
+) -> dict[str, Any]:
+    """Log a post-graduation check-in result. Emits checkin.complete SSE event.
+
+    Records the check-in snapshot, links to graduation baseline, and flags
+    whether regression was detected and whether the user re-entered development.
+    """
+    log_id = str(uuid.uuid4())
+
+    with get_db_session() as conn:
+        conn.execute(
+            """INSERT INTO check_in_log
+               (id, user_id, snapshot_id, graduation_snapshot_id, regression_detected, re_entered_development, created_at)
+               VALUES (?, ?, ?, ?, ?, ?, ?)""",
+            (
+                log_id,
+                user_id,
+                snapshot_id,
+                graduation_snapshot_id,
+                regression_detected,
+                re_entered_development,
+                datetime.utcnow().isoformat(),
+            ),
+        )
+
+    return {
+        "event_type": "checkin.complete",
+        "saved": True,
+        "log_id": log_id,
+        "regression_detected": regression_detected,
+        "re_entered_development": re_entered_development,
+    }
