@@ -5,6 +5,7 @@ const Chat = (() => {
     let _abortController = null;
     let _currentMessageEl = null;
     let _isReadOnly = false;
+    let _isLoading = false;
 
     const _messagesEl = () => document.getElementById('chat-messages');
 
@@ -43,7 +44,27 @@ const Chat = (() => {
 
         input.value = '';
         _appendUserMessage(message);
-        await sendMessage(sessionId, message);
+        _setLoading(true);
+        try {
+            await sendMessage(sessionId, message);
+        } finally {
+            _setLoading(false);
+        }
+    }
+
+    function _setLoading(loading) {
+        _isLoading = loading;
+        const input = document.getElementById('chat-input');
+        const btn = document.querySelector('.chat-send-btn');
+        if (loading) {
+            input.disabled = true;
+            btn.disabled = true;
+            btn.classList.add('chat-send-btn--loading');
+        } else {
+            input.disabled = _isReadOnly;
+            btn.disabled = _isReadOnly;
+            btn.classList.remove('chat-send-btn--loading');
+        }
     }
 
     /**

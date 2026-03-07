@@ -202,11 +202,24 @@ const Results = (() => {
         }
     }
 
+    function _showLoading(el) {
+        const loader = document.createElement('div');
+        loader.className = 'results-loading';
+        const spinner = document.createElement('div');
+        spinner.className = 'spinner';
+        loader.appendChild(spinner);
+        const text = document.createElement('span');
+        Sanitize.setText(text, 'Loading...');
+        loader.appendChild(text);
+        el.appendChild(loader);
+    }
+
     function _renderOrientation(el) {
-        // Load static content from orientation.html
+        _showLoading(el);
         fetch('/content/orientation.html')
             .then(res => res.ok ? res.text() : '')
             .then(html => {
+                el.textContent = '';
                 if (html) {
                     el.appendChild(Sanitize.sanitizeHTML(html));
                 } else {
@@ -214,6 +227,7 @@ const Results = (() => {
                 }
             })
             .catch(() => {
+                el.textContent = '';
                 Sanitize.setText(el, 'Welcome to the Transmutation Engine.');
             });
     }
