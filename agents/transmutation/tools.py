@@ -594,8 +594,11 @@ def save_scenario_response(
 def generate_profile_snapshot(user_id: str) -> dict[str, Any]:
     """Generate a complete profile from assessment data.
 
-    Orchestrates: fetch assessment → score → quadrant placement → spider chart.
+    Orchestrates: fetch assessment → score → quadrant placement → spider chart → flow profile.
     Returns the profile data for the LLM to interpret before saving.
+
+    The flow_data key (when present) contains the v13 moral profile:
+    M vector, weighted total W, moral capital C+, moral debt C-, and per-level flows.
     """
     with get_db_session() as conn:
         row = conn.execute(
@@ -645,7 +648,8 @@ def save_profile_snapshot(user_id: str, interpretation: str) -> dict[str, Any]:
     """Persist a profile snapshot with the LLM's narrative interpretation.
 
     Must be called after generate_profile_snapshot. Saves scores, quadrant,
-    spider chart, and interpretation to the profile_snapshots table.
+    spider chart, interpretation, and flow_data to the profile_snapshots table.
+    Also persists Moral Capital (C+) and Moral Debt (C-) to the moral_ledger table.
     """
     cached = _profile_cache.pop(user_id, None)
     if not cached:
@@ -1072,6 +1076,10 @@ def generate_comparison_snapshot(
 
     Compares the most recent snapshot against a specified previous one
     (typically the pre-reassessment snapshot or graduation snapshot).
+
+    When both snapshots contain flow_data, the result includes a flow_deltas
+    dict with per-metric deltas: moral_work vector, weighted_total, moral_capital,
+    and moral_debt (each with previous, current, and delta values).
     """
     with get_db_session() as conn:
         current = conn.execute(

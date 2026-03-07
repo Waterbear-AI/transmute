@@ -21,13 +21,18 @@ def score_responses(
     responses: dict[str, Any],
     scenario_responses: dict[str, Any],
 ) -> dict[str, Any]:
-    """Score all responses into dimension and sub-dimension averages.
+    """Score all responses into dimension averages and compute flow-based moral profile.
+
+    Runs two parallel scoring paths:
+    1. Likert-based dimension/sub-dimension scoring and quadrant placement (existing)
+    2. Flow-based moral profile via flow_engine (v13 framework)
 
     Returns:
         {
-            "dimensions": { "Emotional Awareness": { "score": 3.5, "sub_dimensions": {...}, ... } },
+            "dimensions": { "Emotional Awareness": { "score": 3.5, "sub_dimensions": {...} } },
             "insufficient_dimensions": ["dim_name", ...],
             "quadrant": { "x": float, "y": float, "archetype": str },
+            "flow_profile": MoralProfile with M vector, W, C+, C-,
         }
     """
     qb = get_question_bank()
