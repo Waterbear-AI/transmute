@@ -672,3 +672,214 @@ def record_comprehension_answer(
         "categories_covered": categories_covered,
         "categories_total": len(qb_categories),
     }
+
+
+# ── Development Agent tools ────────────────────────────────────────────
+
+
+def get_development_roadmap(user_id: str) -> dict[str, Any]:
+    """Retrieve the current (most recent) development roadmap for a user."""
+    with get_db_session() as conn:
+        row = conn.execute(
+            "SELECT * FROM development_roadmap WHERE user_id = ? ORDER BY created_at DESC LIMIT 1",
+            (user_id,),
+        ).fetchone()
+
+    if not row:
+        return {"exists": False}
+
+    return {
+        "exists": True,
+        "id": row["id"],
+        "roadmap": json.loads(row["roadmap"] or "{}"),
+        "parent_roadmap_id": row["parent_roadmap_id"],
+        "created_at": row["created_at"],
+    }
+
+
+def generate_roadmap(user_id: str) -> dict[str, Any]:
+    """Generate a development roadmap from the user's profile.
+
+    Fetches the most recent profile snapshot, identifies weakest
+    transmutation linkages, and returns roadmap data for the LLM
+    to refine before saving.
+    """
+    with get_db_session() as conn:
+        row = conn.execute(
+            "SELECT scores FROM profile_snapshots WHERE user_id = ? ORDER BY created_at DESC LIMIT 1",
+            (user_id,),
+        ).fetchone()
+
+    if not row:
+        return {"error": "No profile snapshot found. Complete assessment first."}
+
+    scores = json.loads(row["scores"] or "{}")
+
+    # Identify weakest dimensions by score
+    ranked = sorted(scores.items(), key=lambda x: x[1].get("score", 0) if isinstance(x[1], dict) else x[1])
+    weakest = ranked[:3] if len(ranked) >= 3 else ranked
+
+    return {
+        "profile_scores": scores,
+        "weakest_dimensions": [
+            {"dimension": dim, "score": data.get("score", 0) if isinstance(data, dict) else data}
+            for dim, data in weakest
+        ],
+        "step_count": 3,
+        "instruction": (
+            "Create a 3-step roadmap targeting these dimensions. "
+            "Each step should include: education context, a concrete practice "
+            "mapped to a transmutation operation, and a reflective conversation prompt."
+        ),
+    }
+
+
+def save_roadmap(user_id: str, roadmap: dict) -> dict[str, Any]:
+    """Persist a development roadmap. Emits development.roadmap SSE event."""
+    roadmap_id = str(uuid.uuid4())
+
+    with get_db_session() as conn:
+        conn.execute(
+            "INSERT INTO development_roadmap (id, user_id, roadmap, created_at) VALUES (?, ?, ?, ?)",
+            (roadmap_id, user_id, json.dumps(roadmap), datetime.utcnow().isoformat()),
+        )
+
+    return {
+        "event_type": "development.roadmap",
+        "saved": True,
+        "roadmap_id": roadmap_id,
+        "roadmap": roadmap,
+    }
+
+
+def log_practice_entry(
+    user_id: str,
+    practice_id: str,
+    reflection: str,
+    self_rating: int,
+) -> dict[str, Any]:
+    """Log a practice journal entry. Emits development.practice SSE event.
+
+    Also checks total entry count to signal readiness for reassessment
+    (10 entries threshold).
+    """
+    entry_id = str(uuid.uuid4())
+
+    with get_db_session() as conn:
+        conn.execute(
+            "INSERT INTO practice_journal (id, user_id, practice_id, reflection, self_rating, created_at) VALUES (?, ?, ?, ?, ?, ?)",
+            (entry_id, user_id, practice_id, reflection, self_rating, datetime.utcnow().isoformat()),
+        )
+
+        # Count total entries for reassessment trigger
+        count_row = conn.execute(
+            "SELECT COUNT(*) as cnt FROM practice_journal WHERE user_id = ?",
+            (user_id,),
+        ).fetchone()
+        total_entries = count_row["cnt"] if count_row else 0
+
+        # Check for downward trend on this practice (3+ entries)
+        trend_rows = conn.execute(
+            "SELECT self_rating FROM practice_journal WHERE user_id = ? AND practice_id = ? ORDER BY created_at DESC LIMIT 3",
+            (user_id, practice_id),
+        ).fetchall()
+
+    downward_trend = False
+    if len(trend_rows) >= 3:
+        ratings = [r["self_rating"] for r in trend_rows]
+        # Most recent first; downward if each is <= the one after it
+        downward_trend = all(ratings[i] <= ratings[i + 1] for i in range(len(ratings) - 1))
+
+    return {
+        "event_type": "development.practice",
+        "saved": True,
+        "entry_id": entry_id,
+        "practice_id": practice_id,
+        "self_rating": self_rating,
+        "total_entries": total_entries,
+        "reassessment_ready": total_entries >= 10,
+        "downward_trend": downward_trend,
+    }
+
+
+def get_practice_history(user_id: str, practice_id: str) -> dict[str, Any]:
+    """Retrieve past journal entries for a specific practice."""
+    with get_db_session() as conn:
+        rows = conn.execute(
+            "SELECT * FROM practice_journal WHERE user_id = ? AND practice_id = ? ORDER BY created_at ASC",
+            (user_id, practice_id),
+        ).fetchall()
+
+    entries = [
+        {
+            "id": r["id"],
+            "reflection": r["reflection"],
+            "self_rating": r["self_rating"],
+            "created_at": r["created_at"],
+        }
+        for r in rows
+    ]
+
+    return {
+        "practice_id": practice_id,
+        "entries": entries,
+        "count": len(entries),
+    }
+
+
+def update_roadmap(
+    user_id: str,
+    adjustment_reason: str,
+    retain_practices: list[str],
+    drop_practices: list[str],
+) -> dict[str, Any]:
+    """Adjust the current roadmap with a 7-day cooldown.
+
+    Creates a new development_roadmap row linked via parent_roadmap_id.
+    Can swap practices but NOT change targeted dimensions.
+    Rejects if the most recent roadmap was created less than 7 days ago.
+    """
+    with get_db_session() as conn:
+        current = conn.execute(
+            "SELECT * FROM development_roadmap WHERE user_id = ? ORDER BY created_at DESC LIMIT 1",
+            (user_id,),
+        ).fetchone()
+
+        if not current:
+            return {"error": "No existing roadmap to adjust"}
+
+        # Enforce 7-day cooldown
+        created_at = datetime.fromisoformat(current["created_at"])
+        days_since = (datetime.utcnow() - created_at).days
+        if days_since < 7:
+            return {
+                "error": "Roadmap adjustment cooldown active",
+                "days_remaining": 7 - days_since,
+                "message": f"Roadmap was last updated {days_since} day(s) ago. Wait {7 - days_since} more day(s).",
+            }
+
+        current_roadmap = json.loads(current["roadmap"] or "{}")
+
+        # Build adjusted roadmap preserving targeted dimensions
+        adjusted = {
+            **current_roadmap,
+            "adjustment_reason": adjustment_reason,
+            "retain_practices": retain_practices,
+            "drop_practices": drop_practices,
+            "adjusted_at": datetime.utcnow().isoformat(),
+        }
+
+        new_id = str(uuid.uuid4())
+        conn.execute(
+            "INSERT INTO development_roadmap (id, user_id, parent_roadmap_id, roadmap, created_at) VALUES (?, ?, ?, ?, ?)",
+            (new_id, user_id, current["id"], json.dumps(adjusted), datetime.utcnow().isoformat()),
+        )
+
+    return {
+        "event_type": "development.roadmap",
+        "saved": True,
+        "roadmap_id": new_id,
+        "parent_roadmap_id": current["id"],
+        "adjustment_reason": adjustment_reason,
+        "roadmap": adjusted,
+    }
