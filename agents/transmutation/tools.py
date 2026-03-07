@@ -1044,3 +1044,169 @@ def evaluate_graduation_readiness(user_id: str) -> dict[str, Any]:
         "indicators_required": 2,
         "indicators": indicators,
     }
+
+
+# ── Graduation Agent tools ─────────────────────────────────────────────
+
+
+def get_longitudinal_snapshots(user_id: str) -> dict[str, Any]:
+    """Retrieve all profile snapshots for a user (timeline view).
+
+    Returns snapshots in chronological order for longitudinal review
+    during the graduation closing sequence.
+    """
+    with get_db_session() as conn:
+        rows = conn.execute(
+            "SELECT id, session_id, scores, quadrant_placement, interpretation, created_at "
+            "FROM profile_snapshots WHERE user_id = ? ORDER BY created_at ASC",
+            (user_id,),
+        ).fetchall()
+
+    snapshots = [
+        {
+            "id": r["id"],
+            "scores": json.loads(r["scores"] or "{}"),
+            "quadrant_placement": json.loads(r["quadrant_placement"] or "{}"),
+            "interpretation": r["interpretation"],
+            "created_at": r["created_at"],
+        }
+        for r in rows
+    ]
+
+    return {
+        "snapshots": snapshots,
+        "count": len(snapshots),
+    }
+
+
+def generate_graduation_artifacts(user_id: str) -> dict[str, Any]:
+    """Generate practice map and pattern narrative data for graduation.
+
+    Aggregates practice journal entries, roadmap history, and longitudinal
+    snapshots to provide data the LLM uses to write a pattern narrative.
+    """
+    with get_db_session() as conn:
+        # Get all practice entries
+        practices = conn.execute(
+            "SELECT practice_id, reflection, self_rating, created_at "
+            "FROM practice_journal WHERE user_id = ? ORDER BY created_at ASC",
+            (user_id,),
+        ).fetchall()
+
+        # Get roadmap history
+        roadmaps = conn.execute(
+            "SELECT id, parent_roadmap_id, roadmap, created_at "
+            "FROM development_roadmap WHERE user_id = ? ORDER BY created_at ASC",
+            (user_id,),
+        ).fetchall()
+
+        # Get first and last snapshots
+        first_snapshot = conn.execute(
+            "SELECT scores, quadrant_placement, created_at "
+            "FROM profile_snapshots WHERE user_id = ? ORDER BY created_at ASC LIMIT 1",
+            (user_id,),
+        ).fetchone()
+
+        last_snapshot = conn.execute(
+            "SELECT scores, quadrant_placement, created_at "
+            "FROM profile_snapshots WHERE user_id = ? ORDER BY created_at DESC LIMIT 1",
+            (user_id,),
+        ).fetchone()
+
+        # Get graduation readiness indicators
+        readiness = evaluate_graduation_readiness(user_id)
+
+    # Build practice map: {practice_id: [entries]}
+    practice_map: dict[str, list[dict]] = {}
+    for p in practices:
+        pid = p["practice_id"]
+        if pid not in practice_map:
+            practice_map[pid] = []
+        practice_map[pid].append({
+            "reflection": p["reflection"],
+            "self_rating": p["self_rating"],
+            "created_at": p["created_at"],
+        })
+
+    # Compute growth trajectory
+    initial_scores = json.loads(first_snapshot["scores"] or "{}") if first_snapshot else {}
+    final_scores = json.loads(last_snapshot["scores"] or "{}") if last_snapshot else {}
+
+    growth = {}
+    for dim in set(list(initial_scores.keys()) + list(final_scores.keys())):
+        init = initial_scores.get(dim, {})
+        final = final_scores.get(dim, {})
+        init_score = init.get("score", 0) if isinstance(init, dict) else init
+        final_score = final.get("score", 0) if isinstance(final, dict) else final
+        growth[dim] = {
+            "initial": init_score,
+            "final": final_score,
+            "change": round(final_score - init_score, 2),
+        }
+
+    return {
+        "practice_map": practice_map,
+        "total_practices": len(practices),
+        "unique_practices": len(practice_map),
+        "roadmap_count": len(roadmaps),
+        "growth_trajectory": growth,
+        "initial_quadrant": json.loads(first_snapshot["quadrant_placement"] or "{}").get("quadrant", "") if first_snapshot else "",
+        "final_quadrant": json.loads(last_snapshot["quadrant_placement"] or "{}").get("quadrant", "") if last_snapshot else "",
+        "graduation_indicators": readiness.get("indicators", {}),
+    }
+
+
+def save_graduation_record(
+    user_id: str,
+    pattern_narrative: str,
+    graduation_indicators: dict,
+) -> dict[str, Any]:
+    """Persist graduation record with LLM narrative and indicator evidence.
+
+    Emits graduation.complete SSE event.
+    """
+    record_id = str(uuid.uuid4())
+
+    with get_db_session() as conn:
+        # Get snapshot IDs
+        final_snapshot = conn.execute(
+            "SELECT id FROM profile_snapshots WHERE user_id = ? ORDER BY created_at DESC LIMIT 1",
+            (user_id,),
+        ).fetchone()
+
+        initial_snapshot = conn.execute(
+            "SELECT id FROM profile_snapshots WHERE user_id = ? ORDER BY created_at ASC LIMIT 1",
+            (user_id,),
+        ).fetchone()
+
+        # Build practice map summary
+        practices = conn.execute(
+            "SELECT practice_id, COUNT(*) as cnt FROM practice_journal WHERE user_id = ? GROUP BY practice_id",
+            (user_id,),
+        ).fetchall()
+
+        practice_map = {p["practice_id"]: p["cnt"] for p in practices}
+
+        conn.execute(
+            """INSERT INTO graduation_record
+               (id, user_id, final_snapshot_id, initial_snapshot_id, practice_map, pattern_narrative, graduation_indicators, created_at)
+               VALUES (?, ?, ?, ?, ?, ?, ?, ?)""",
+            (
+                record_id,
+                user_id,
+                final_snapshot["id"] if final_snapshot else None,
+                initial_snapshot["id"] if initial_snapshot else None,
+                json.dumps(practice_map),
+                pattern_narrative,
+                json.dumps(graduation_indicators),
+                datetime.utcnow().isoformat(),
+            ),
+        )
+
+    return {
+        "event_type": "graduation.complete",
+        "saved": True,
+        "record_id": record_id,
+        "pattern_narrative": pattern_narrative,
+        "graduation_indicators": graduation_indicators,
+    }
