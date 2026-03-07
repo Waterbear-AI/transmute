@@ -883,3 +883,164 @@ def update_roadmap(
         "adjustment_reason": adjustment_reason,
         "roadmap": adjusted,
     }
+
+
+# ── Reassessment Agent tools ──────────────────────────────────────────
+
+
+def generate_comparison_snapshot(
+    user_id: str, previous_snapshot_id: str
+) -> dict[str, Any]:
+    """Compute delta scores and quadrant shift between two profile snapshots.
+
+    Compares the most recent snapshot against a specified previous one
+    (typically the pre-reassessment snapshot or graduation snapshot).
+    """
+    with get_db_session() as conn:
+        current = conn.execute(
+            "SELECT * FROM profile_snapshots WHERE user_id = ? ORDER BY created_at DESC LIMIT 1",
+            (user_id,),
+        ).fetchone()
+
+        previous = conn.execute(
+            "SELECT * FROM profile_snapshots WHERE id = ? AND user_id = ?",
+            (previous_snapshot_id, user_id),
+        ).fetchone()
+
+    if not current:
+        return {"error": "No current profile snapshot found"}
+    if not previous:
+        return {"error": f"Previous snapshot not found: {previous_snapshot_id}"}
+
+    current_scores = json.loads(current["scores"] or "{}")
+    previous_scores = json.loads(previous["scores"] or "{}")
+    current_quadrant = json.loads(current["quadrant_placement"] or "{}")
+    previous_quadrant = json.loads(previous["quadrant_placement"] or "{}")
+
+    # Compute per-dimension deltas
+    deltas = {}
+    for dim in set(list(current_scores.keys()) + list(previous_scores.keys())):
+        curr_val = current_scores.get(dim, {})
+        prev_val = previous_scores.get(dim, {})
+        curr_score = curr_val.get("score", 0) if isinstance(curr_val, dict) else curr_val
+        prev_score = prev_val.get("score", 0) if isinstance(prev_val, dict) else prev_val
+        delta = round(curr_score - prev_score, 2)
+        deltas[dim] = {
+            "previous": prev_score,
+            "current": curr_score,
+            "delta": delta,
+            "direction": "up" if delta > 0 else "down" if delta < 0 else "stable",
+        }
+
+    # Quadrant shift
+    curr_q = current_quadrant.get("quadrant", "")
+    prev_q = previous_quadrant.get("quadrant", "")
+    quadrant_shifted = curr_q != prev_q
+
+    return {
+        "current_snapshot_id": current["id"],
+        "previous_snapshot_id": previous_snapshot_id,
+        "deltas": deltas,
+        "quadrant_shift": {
+            "previous": prev_q,
+            "current": curr_q,
+            "shifted": quadrant_shifted,
+        },
+        "current_created_at": current["created_at"],
+        "previous_created_at": previous["created_at"],
+    }
+
+
+def evaluate_graduation_readiness(user_id: str) -> dict[str, Any]:
+    """Deterministically check the 3 graduation convergence indicators.
+
+    Indicators (any 2 of 3 triggers graduation):
+    1. Pattern Stability: Delta < 5% across all targeted dims for 2 consecutive cycles
+    2. Quadrant Consolidation: Same quadrant for 2 consecutive reassessments
+    3. Self-Assessed Readiness: User explicitly indicated readiness (stored in session state)
+
+    NOT criteria: reaching Transmuter quadrant, minimum score, time deadline.
+    """
+    with get_db_session() as conn:
+        # Get the 3 most recent profile snapshots (need 3 to check "2 consecutive")
+        snapshots = conn.execute(
+            "SELECT * FROM profile_snapshots WHERE user_id = ? ORDER BY created_at DESC LIMIT 3",
+            (user_id,),
+        ).fetchall()
+
+        # Check self-assessed readiness from session state
+        session_row = conn.execute(
+            "SELECT session_state FROM adk_sessions WHERE user_id = ? AND archived = FALSE ORDER BY created_at DESC LIMIT 1",
+            (user_id,),
+        ).fetchone()
+
+    indicators = {
+        "pattern_stability": {"met": False, "evidence": ""},
+        "quadrant_consolidation": {"met": False, "evidence": ""},
+        "self_assessed_readiness": {"met": False, "evidence": ""},
+    }
+
+    if len(snapshots) < 3:
+        indicators["pattern_stability"]["evidence"] = f"Only {len(snapshots)} snapshots; need at least 3 for two consecutive cycles"
+        indicators["quadrant_consolidation"]["evidence"] = f"Only {len(snapshots)} snapshots; need at least 3"
+    else:
+        # Snapshots are newest-first: [current, previous, before_previous]
+        scores = [json.loads(s["scores"] or "{}") for s in snapshots]
+        quadrants = [json.loads(s["quadrant_placement"] or "{}") for s in snapshots]
+
+        # 1. Pattern Stability: delta < 5% for 2 consecutive cycles
+        # Cycle 1: current vs previous, Cycle 2: previous vs before_previous
+        def compute_max_delta(scores_a, scores_b):
+            max_delta = 0
+            for dim in set(list(scores_a.keys()) + list(scores_b.keys())):
+                a = scores_a.get(dim, {})
+                b = scores_b.get(dim, {})
+                sa = a.get("score", 0) if isinstance(a, dict) else a
+                sb = b.get("score", 0) if isinstance(b, dict) else b
+                max_delta = max(max_delta, abs(sa - sb))
+            return round(max_delta, 2)
+
+        delta_cycle1 = compute_max_delta(scores[0], scores[1])
+        delta_cycle2 = compute_max_delta(scores[1], scores[2])
+
+        stability_met = delta_cycle1 < 5 and delta_cycle2 < 5
+        indicators["pattern_stability"]["met"] = stability_met
+        indicators["pattern_stability"]["evidence"] = (
+            f"Cycle 1 max delta: {delta_cycle1}%, Cycle 2 max delta: {delta_cycle2}% "
+            f"(threshold: <5% for both)"
+        )
+
+        # 2. Quadrant Consolidation: same quadrant for 2 consecutive reassessments
+        q0 = quadrants[0].get("quadrant", "")
+        q1 = quadrants[1].get("quadrant", "")
+        q2 = quadrants[2].get("quadrant", "")
+
+        consolidation_met = q0 == q1 and q1 == q2 and q0 != ""
+        indicators["quadrant_consolidation"]["met"] = consolidation_met
+        indicators["quadrant_consolidation"]["evidence"] = (
+            f"Last 3 quadrants: [{q0}, {q1}, {q2}] "
+            f"({'all same' if consolidation_met else 'not consolidated'})"
+        )
+
+    # 3. Self-Assessed Readiness: check session state
+    if session_row:
+        state = json.loads(session_row["session_state"] or "{}")
+        readiness = state.get("self_assessed_readiness", False)
+        indicators["self_assessed_readiness"]["met"] = bool(readiness)
+        indicators["self_assessed_readiness"]["evidence"] = (
+            "User indicated readiness" if readiness else "User has not indicated readiness"
+        )
+    else:
+        indicators["self_assessed_readiness"]["evidence"] = "No active session found"
+
+    # Count how many indicators are met
+    met_count = sum(1 for ind in indicators.values() if ind["met"])
+    graduation_ready = met_count >= 2
+
+    return {
+        "event_type": "graduation.readiness",
+        "graduation_ready": graduation_ready,
+        "indicators_met": met_count,
+        "indicators_required": 2,
+        "indicators": indicators,
+    }
