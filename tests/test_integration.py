@@ -212,6 +212,64 @@ class TestExportEndpoint:
         assert resp.status_code == 401
 
 
+class TestRateLimiting:
+    def test_chat_rate_limit_returns_429(self):
+        """Verify /api/chat returns 429 after exceeding 30 requests/minute."""
+        limiter.enabled = True
+        limiter.reset()
+        try:
+            rate_client = TestClient(app)
+            # Register and auth
+            reg = rate_client.post("/auth/register", json={
+                "name": "Rate User",
+                "email": "rate@example.com",
+                "password": "password123",
+            })
+            cookies = reg.cookies
+
+            # Need a session_id - use a dummy one (will get 404 but rate limit applies first)
+            got_429 = False
+            for i in range(35):
+                resp = rate_client.post(
+                    "/api/chat/test-session",
+                    json={"message": "hi"},
+                    cookies=cookies,
+                )
+                if resp.status_code == 429:
+                    got_429 = True
+                    break
+            assert got_429, "Expected 429 response after exceeding rate limit"
+        finally:
+            limiter.enabled = False
+
+    def test_assessment_rate_limit_returns_429(self):
+        """Verify /api/assessment/responses returns 429 after exceeding 60 requests/minute."""
+        limiter.enabled = True
+        limiter.reset()
+        try:
+            rate_client = TestClient(app)
+            reg = rate_client.post("/auth/register", json={
+                "name": "Rate User 2",
+                "email": "rate2@example.com",
+                "password": "password123",
+            })
+            cookies = reg.cookies
+
+            got_429 = False
+            for i in range(65):
+                resp = rate_client.post(
+                    "/api/assessment/responses",
+                    json={"question_id": "q1", "score": 3},
+                    cookies=cookies,
+                )
+                if resp.status_code == 429:
+                    got_429 = True
+                    break
+            assert got_429, "Expected 429 response after exceeding rate limit"
+        finally:
+            limiter.enabled = False
+
+
 class TestMigrations:
     def test_all_tables_created(self):
         import sqlite3
