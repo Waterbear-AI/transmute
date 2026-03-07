@@ -1,0 +1,697 @@
+{
+  "Emotional Awareness": {
+    "what_this_means": [
+      {
+        "id": "cc_ea_cat1_q1",
+        "type": "identify_pattern",
+        "stem": "Jamie notices they feel anxious every Sunday evening but has never connected it to their Monday morning team meetings. In transmutarian terms, what is happening?",
+        "options": [
+          {"key": "a", "text": "Jamie is a Transmuter — they are filtering the anxiety before it affects others"},
+          {"key": "b", "text": "Jamie has low Emotional Awareness — the deprivation signal exists but is not yet consciously recognized"},
+          {"key": "c", "text": "Jamie is an Extractor — they are drawing anxiety from the team meetings"},
+          {"key": "d", "text": "Jamie has high Emotional Regulation — they are successfully managing the anxiety"}
+        ],
+        "correct_option": "b",
+        "explanation": "Emotional Awareness is the capacity to consciously recognize what you are feeling and why. Jamie experiences the anxiety but hasn't connected it to its source — the signal is there, but awareness hasn't caught up yet.",
+        "reflection_prompt": "Think about your own score on Emotional Awareness. Is there a recurring feeling in your life that you experience but haven't fully connected to its source?",
+        "difficulty": "foundational"
+      },
+      {
+        "id": "cc_ea_cat1_q2",
+        "type": "apply_concept",
+        "stem": "A friend tells you 'I'm fine' but their voice is tight and they avoid eye contact. Which sub-dimension of Emotional Awareness is most relevant to noticing this discrepancy?",
+        "options": [
+          {"key": "a", "text": "Emotional Regulation — managing your response to their mood"},
+          {"key": "b", "text": "Trigger Awareness — identifying what triggered their state"},
+          {"key": "c", "text": "Empathic Attunement — sensing others' emotional states beyond their words"},
+          {"key": "d", "text": "Emotion Recognition — identifying your own emotional response"}
+        ],
+        "correct_option": "c",
+        "explanation": "Empathic Attunement is the sub-dimension focused on sensing how others are feeling, even when their words don't match. Noticing the gap between 'I'm fine' and the nonverbal signals requires attunement to another person's emotional state.",
+        "difficulty": "foundational"
+      }
+    ],
+    "your_score": [
+      {
+        "id": "cc_ea_cat2_q1",
+        "type": "apply_concept",
+        "stem": "Your Emotional Awareness score is 14/25. Your Emotion Recognition sub-dimension is 8/10 but your Emotional Regulation is 2/10. What does this pattern indicate?",
+        "options": [
+          {"key": "a", "text": "You are a Transmuter who filters deprivation effectively"},
+          {"key": "b", "text": "You see the emotional flows clearly but lack the tools to transform them — the classic Conduit pattern"},
+          {"key": "c", "text": "Your score is too low to draw any conclusions"},
+          {"key": "d", "text": "You need to improve Emotion Recognition first before working on Regulation"}
+        ],
+        "correct_option": "b",
+        "explanation": "High recognition with low regulation is the signature Conduit pattern for emotions — you perceive what's flowing through you but pass it along unchanged. The awareness is there; the transformation capacity isn't yet developed.",
+        "reflection_prompt": "Look at your own sub-dimension scores for Emotional Awareness. Do you see a similar gap between recognizing emotions and regulating them?",
+        "difficulty": "applied"
+      },
+      {
+        "id": "cc_ea_cat2_q2",
+        "type": "predict_outcome",
+        "stem": "Someone with an Emotional Awareness score of 22/25 enters the development phase. What is most likely true about their development roadmap?",
+        "options": [
+          {"key": "a", "text": "Emotional Awareness will be a primary target for improvement"},
+          {"key": "b", "text": "Emotional Awareness is unlikely to be a roadmap target — the roadmap prioritizes weakest transmutation linkages"},
+          {"key": "c", "text": "They should skip the development phase entirely"},
+          {"key": "d", "text": "Their high score means Emotional Awareness cannot improve further"}
+        ],
+        "correct_option": "b",
+        "explanation": "The development roadmap targets the weakest transmutation linkages, not just lowest scores. A 22/25 dimension is already strong — the roadmap will focus on dimensions where growth would have the highest transmutation impact.",
+        "difficulty": "applied"
+      }
+    ],
+    "daily_effects": [
+      {
+        "id": "cc_ea_cat3_q1",
+        "type": "predict_outcome",
+        "stem": "A person with low Trigger Awareness goes through a stressful week at work. Predict what is most likely to happen in their personal relationships.",
+        "options": [
+          {"key": "a", "text": "They will consciously process the work stress before engaging with family"},
+          {"key": "b", "text": "Work stress will leak into personal interactions because they can't identify what's triggering their reactivity"},
+          {"key": "c", "text": "They will effectively compartmentalize work and personal life"},
+          {"key": "d", "text": "Their relationships will be unaffected because triggers only apply at work"}
+        ],
+        "correct_option": "b",
+        "explanation": "Low Trigger Awareness means you don't recognize what activates your emotional responses. Without this awareness, stress from one context bleeds into others — you snap at your partner without realizing the trigger was a work email three hours ago. This is deprivation flowing through unchanged.",
+        "difficulty": "foundational"
+      },
+      {
+        "id": "cc_ea_cat3_q2",
+        "type": "identify_pattern",
+        "stem": "Maya often absorbs the moods of people around her — if her partner is stressed, she becomes stressed. If her friends are excited, she feels excited. She doesn't choose this; it just happens. What daily filtering pattern does this describe?",
+        "options": [
+          {"key": "a", "text": "High Empathic Attunement with low Emotional Regulation — she senses flows accurately but absorbs them rather than filtering"},
+          {"key": "b", "text": "Low Emotional Awareness — she doesn't notice what she's feeling"},
+          {"key": "c", "text": "High Transmutation Capacity — she transforms others' emotions"},
+          {"key": "d", "text": "Low Social Awareness — she doesn't understand interpersonal dynamics"}
+        ],
+        "correct_option": "a",
+        "explanation": "Maya's pattern shows strong attunement (she accurately senses others' states) paired with low regulation (she can't filter what comes in). In transmutarian terms, she's an Absorber for emotions — the deprivation and fulfillment flow in but aren't transformed.",
+        "reflection_prompt": "Do you notice yourself absorbing others' moods? When does this happen most — at work, at home, or in social settings?",
+        "difficulty": "applied"
+      }
+    ],
+    "strengths_gaps": [
+      {
+        "id": "cc_ea_cat4_q1",
+        "type": "apply_concept",
+        "stem": "Your Emotional Awareness profile shows: Emotion Recognition 9/10, Empathic Attunement 8/10, Trigger Awareness 3/10, Emotional Regulation 4/10. Which gap should the development roadmap prioritize and why?",
+        "options": [
+          {"key": "a", "text": "Emotion Recognition — always improve your strongest area first"},
+          {"key": "b", "text": "Trigger Awareness — it's the lowest score and directly blocks regulation (you can't regulate what you can't identify the source of)"},
+          {"key": "c", "text": "Empathic Attunement — it enables better relationships"},
+          {"key": "d", "text": "All four equally — balanced growth is always best"}
+        ],
+        "correct_option": "b",
+        "explanation": "Trigger Awareness is the bottleneck. Without knowing what activates your responses, regulation stays reactive. The roadmap targets the weakest transmutation linkage — and here, trigger identification is the missing link between your strong recognition and your underdeveloped regulation.",
+        "difficulty": "applied"
+      },
+      {
+        "id": "cc_ea_cat4_q2",
+        "type": "predict_outcome",
+        "stem": "A person has high Emotional Awareness across all sub-dimensions (23/25). In a transmutarian context, what is the most accurate interpretation of this strength?",
+        "options": [
+          {"key": "a", "text": "They are already a Transmuter"},
+          {"key": "b", "text": "They have the perceptual foundation for transmutation but may still lack the capacity to actually transform what they perceive"},
+          {"key": "c", "text": "They no longer need development in any area"},
+          {"key": "d", "text": "High awareness guarantees high Transmutation Capacity"}
+        ],
+        "correct_option": "b",
+        "explanation": "Awareness dimensions are prerequisites, not guarantees. High Emotional Awareness means you see the flows clearly, but seeing and transforming are different capacities. Transmutation Capacity is measured separately — you might have perfect perception and still pass everything through unchanged.",
+        "difficulty": "foundational"
+      }
+    ],
+    "external_interaction": [
+      {
+        "id": "cc_ea_cat5_q1",
+        "type": "identify_pattern",
+        "stem": "In a workplace conflict, Person A accurately reads everyone's emotions but then amplifies the tension by voicing each person's frustrations aloud. Person B barely notices the emotional dynamics but stays calm, keeping the group grounded. What Emotional Awareness pattern does Person A demonstrate?",
+        "options": [
+          {"key": "a", "text": "High awareness used as a Magnifier — they perceive accurately but amplify deprivation rather than filtering it"},
+          {"key": "b", "text": "Low awareness — they are misreading the room"},
+          {"key": "c", "text": "High Transmutation Capacity — they are processing the conflict"},
+          {"key": "d", "text": "Low Social Awareness — they don't understand group dynamics"}
+        ],
+        "correct_option": "a",
+        "explanation": "Person A demonstrates high Emotional Awareness (accurate perception) combined with a Magnifier pattern — they take in the deprivation accurately and amplify it outward. Awareness without transmutation intent can make you an effective amplifier of what already exists.",
+        "difficulty": "applied"
+      },
+      {
+        "id": "cc_ea_cat5_q2",
+        "type": "predict_outcome",
+        "stem": "A parent with high Emotional Awareness but low Transmutation Capacity is raising a child. How is this combination most likely to affect the child's development?",
+        "options": [
+          {"key": "a", "text": "The parent will effectively shield the child from all stress"},
+          {"key": "b", "text": "The parent will model emotional perception but may also pass through unfiltered stress — the child learns to see emotions but not transform them"},
+          {"key": "c", "text": "The parent's awareness will automatically develop the child's Transmutation Capacity"},
+          {"key": "d", "text": "There will be no impact on the child because awareness is internal"}
+        ],
+        "correct_option": "b",
+        "explanation": "Children learn transmutation patterns from their caregivers. A parent who perceives emotions clearly but can't filter deprivation teaches the child the same pattern — high awareness, low transformation. This is the intergenerational Conduit pattern that transmutarianism aims to break.",
+        "reflection_prompt": "Think about what emotional patterns you learned from your own caregivers. Did they model more filtering or more passing-through?",
+        "difficulty": "applied"
+      }
+    ]
+  },
+  "Transmutation Capacity": {
+    "what_this_means": [
+      {
+        "id": "cc_tc_cat1_q1",
+        "type": "identify_pattern",
+        "stem": "Alex receives criticism at work that feels unfair. Instead of letting it ruin their day or passing the frustration to their family, they sit with it, extract what's useful, and let the rest go. Which transmutation pattern does this demonstrate?",
+        "options": [
+          {"key": "a", "text": "Conduit — they are passing the criticism through unchanged"},
+          {"key": "b", "text": "Absorber — they are taking in the criticism and holding it"},
+          {"key": "c", "text": "Transmuter — they are filtering deprivation by extracting value and releasing the rest"},
+          {"key": "d", "text": "Extractor — they are drawing value from the critic"}
+        ],
+        "correct_option": "c",
+        "explanation": "Transmutation Capacity is the ability to filter deprivation and amplify fulfillment. Alex is actively filtering — taking in deprivation (unfair criticism), extracting what's useful, and not passing the negativity forward. This is the Transmuter pattern in action.",
+        "difficulty": "foundational"
+      },
+      {
+        "id": "cc_tc_cat1_q2",
+        "type": "apply_concept",
+        "stem": "The five quadrant archetypes are Transmuter, Magnifier, Absorber, Extractor, and Conduit. Which archetype is described as morally neutral — neither positive nor negative?",
+        "options": [
+          {"key": "a", "text": "Transmuter — because transmutation is always balanced"},
+          {"key": "b", "text": "Absorber — because absorption doesn't affect others"},
+          {"key": "c", "text": "Conduit — they pass deprivation and fulfillment through unchanged, which is the default human pattern"},
+          {"key": "d", "text": "Extractor — because extraction can be beneficial"}
+        ],
+        "correct_option": "c",
+        "explanation": "The Conduit pattern is morally neutral — it means you pass flows through without transforming them. Most people operate as Conduits in most contexts. It's not a failure; it's the baseline from which transmutation capacity can develop.",
+        "difficulty": "foundational"
+      }
+    ],
+    "your_score": [
+      {
+        "id": "cc_tc_cat2_q1",
+        "type": "apply_concept",
+        "stem": "Your Transmutation Capacity profile shows: Deprivation Filtering 3/10, Fulfillment Emission 8/10, Amplification Awareness 7/10. What quadrant placement is this pattern most consistent with?",
+        "options": [
+          {"key": "a", "text": "Transmuter — high on both axes"},
+          {"key": "b", "text": "Magnifier — you amplify fulfillment outward but struggle to filter deprivation coming in"},
+          {"key": "c", "text": "Absorber — you take in both deprivation and fulfillment"},
+          {"key": "d", "text": "Conduit — you pass everything through unchanged"}
+        ],
+        "correct_option": "b",
+        "explanation": "High Fulfillment Emission with low Deprivation Filtering places you in the Magnifier quadrant — you're good at amplifying positive flows outward, but deprivation passes through you unfiltered. The development gap is on the filtering side.",
+        "difficulty": "applied"
+      },
+      {
+        "id": "cc_tc_cat2_q2",
+        "type": "predict_outcome",
+        "stem": "Two users both score 15/25 on Transmutation Capacity overall, but User A has even sub-dimension scores (all around 3/5) while User B has extreme variation (1/5 in filtering, 5/5 in emission). Who will likely benefit more from development practices?",
+        "options": [
+          {"key": "a", "text": "User A — even scores are easier to improve"},
+          {"key": "b", "text": "User B — extreme variation means targeted practices on the weak sub-dimension can produce rapid improvement"},
+          {"key": "c", "text": "Both equally — the total score is what matters"},
+          {"key": "d", "text": "Neither — 15/25 is too low for development to help"}
+        ],
+        "correct_option": "b",
+        "explanation": "The development roadmap targets the weakest transmutation linkages, not average scores. User B has a clear bottleneck (filtering at 1/5) that, once addressed, would dramatically shift their overall capacity. Targeted practice on a specific weakness is more impactful than broad improvement.",
+        "difficulty": "applied"
+      }
+    ],
+    "daily_effects": [
+      {
+        "id": "cc_tc_cat3_q1",
+        "type": "predict_outcome",
+        "stem": "A person with strong Deprivation Filtering but weak Fulfillment Emission manages a team. Predict how this pattern affects their daily leadership.",
+        "options": [
+          {"key": "a", "text": "They shield the team from organizational stress but rarely celebrate wins or share positive energy — the team feels protected but uninspired"},
+          {"key": "b", "text": "They amplify stress throughout the team"},
+          {"key": "c", "text": "They have no impact on team dynamics"},
+          {"key": "d", "text": "They extract energy from team members to fuel their own resilience"}
+        ],
+        "correct_option": "a",
+        "explanation": "Strong filtering means deprivation stops with them — organizational stress doesn't cascade to the team. But weak emission means fulfillment doesn't flow outward either. The team is shielded but not energized. This is a common leadership pattern: protective but not generative.",
+        "difficulty": "applied"
+      },
+      {
+        "id": "cc_tc_cat3_q2",
+        "type": "identify_pattern",
+        "stem": "Dara volunteers at a homeless shelter every week. After each session, she feels emotionally drained for days, questioning whether she makes any difference. She keeps going because she believes she should. What transmutation pattern is operating?",
+        "options": [
+          {"key": "a", "text": "Transmuter — she is transforming deprivation through service"},
+          {"key": "b", "text": "Absorber — she takes in the deprivation she encounters but lacks the filtering capacity to process it, leading to depletion"},
+          {"key": "c", "text": "Magnifier — she is amplifying the deprivation she witnesses"},
+          {"key": "d", "text": "Conduit — she passes the experience through unchanged"}
+        ],
+        "correct_option": "b",
+        "explanation": "Dara's pattern is Absorption — she takes in the deprivation she encounters (emotional distress, systemic injustice) but can't filter or transform it. The result is depletion. Sustainable service requires transmutation — the ability to witness deprivation without being consumed by it.",
+        "reflection_prompt": "Think about activities in your life where you give to others. Do any of them leave you consistently drained? What would it look like to filter rather than absorb?",
+        "difficulty": "foundational"
+      }
+    ],
+    "strengths_gaps": [
+      {
+        "id": "cc_tc_cat4_q1",
+        "type": "apply_concept",
+        "stem": "Your profile shows Transmutation Capacity as your weakest dimension, but your Emotional Awareness and Meta-Cognitive Awareness are both strong. What does this combination suggest for your development path?",
+        "options": [
+          {"key": "a", "text": "You need to start over with awareness development"},
+          {"key": "b", "text": "The awareness machinery is in place — development practices should focus on converting perception into transformation action"},
+          {"key": "c", "text": "Strong awareness will automatically develop into transmutation capacity over time"},
+          {"key": "d", "text": "You should ignore Transmutation Capacity and focus on maintaining your awareness scores"}
+        ],
+        "correct_option": "b",
+        "explanation": "Awareness dimensions are prerequisites for transmutation. If you already have strong perceptual foundations, development can focus directly on the transformation step — practicing the moment between perceiving a flow and choosing what to do with it.",
+        "difficulty": "applied"
+      },
+      {
+        "id": "cc_tc_cat4_q2",
+        "type": "predict_outcome",
+        "stem": "A user's Conduit Recognition sub-dimension is very high (9/10) but their other Transmutation Capacity sub-dimensions are low. What does this specific strength enable?",
+        "options": [
+          {"key": "a", "text": "Nothing useful — Conduit Recognition is the least important sub-dimension"},
+          {"key": "b", "text": "They can accurately identify when they are passing flows through unchanged, which is the first step toward choosing to transform them instead"},
+          {"key": "c", "text": "They are already operating as a Transmuter"},
+          {"key": "d", "text": "They need to lower their Conduit Recognition to improve other areas"}
+        ],
+        "correct_option": "b",
+        "explanation": "Conduit Recognition is meta-awareness of your own default pattern. Knowing when you're in Conduit mode is the prerequisite for choosing a different response. You can't change a pattern you don't see. This strength is a launchpad for developing active filtering and emission.",
+        "difficulty": "applied"
+      }
+    ],
+    "external_interaction": [
+      {
+        "id": "cc_tc_cat5_q1",
+        "type": "predict_outcome",
+        "stem": "In a family where one parent is a Transmuter and the other is a Magnifier, how will deprivation from external stressors (job loss, financial pressure) most likely flow through the family system?",
+        "options": [
+          {"key": "a", "text": "Both parents will filter the stress equally"},
+          {"key": "b", "text": "The Transmuter will filter deprivation while the Magnifier amplifies it — creating conflicting signals for children, who may learn that stress is both manageable and overwhelming"},
+          {"key": "c", "text": "The Magnifier will cancel out the Transmuter's filtering"},
+          {"key": "d", "text": "External stressors don't affect family transmutation patterns"}
+        ],
+        "correct_option": "b",
+        "explanation": "Transmutation patterns interact within systems. Children in this family receive two models: one parent demonstrates that deprivation can be filtered, while the other demonstrates amplification. The child's own pattern will be influenced by which model they internalize — this is intergenerational transmission in action.",
+        "difficulty": "applied"
+      },
+      {
+        "id": "cc_tc_cat5_q2",
+        "type": "apply_concept",
+        "stem": "A community organizer wants to shift their neighborhood from collective Absorption (everyone feels the problems but no one transforms them) to collective Transmutation. According to the framework, what is the most effective starting point?",
+        "options": [
+          {"key": "a", "text": "Eliminate all sources of deprivation in the neighborhood"},
+          {"key": "b", "text": "Develop individual transmutation capacity in key community members who can model filtering and emission for others"},
+          {"key": "c", "text": "Ignore the deprivation and focus only on fulfillment"},
+          {"key": "d", "text": "Assign each person a quadrant role to play"}
+        ],
+        "correct_option": "b",
+        "explanation": "Systemic change starts with individual capacity. The regenerative focus (Section 6.13) emphasizes building independent capacity, not dependency. Community members who develop transmutation capacity model it for others, creating a cascading effect through the social network.",
+        "difficulty": "applied"
+      }
+    ]
+  },
+  "Social Awareness": {
+    "what_this_means": [
+      {
+        "id": "cc_sa_cat1_q1",
+        "type": "identify_pattern",
+        "stem": "In a group project, Taylor always goes along with the majority opinion even when they privately disagree. They later complain to friends about the group's decisions. What Social Awareness sub-dimension is Taylor struggling with?",
+        "options": [
+          {"key": "a", "text": "Communication Patterns — they cannot express themselves clearly"},
+          {"key": "b", "text": "Boundary Recognition — they struggle to maintain their own position within group dynamics"},
+          {"key": "c", "text": "Relational Impact — they don't understand how they affect others"},
+          {"key": "d", "text": "Group Dynamics — they can't read the room"}
+        ],
+        "correct_option": "b",
+        "explanation": "Boundary Recognition is the ability to maintain your own position and limits within interpersonal dynamics. Taylor's pattern — complying publicly then complaining privately — shows a boundary deficit. They perceive the social pressure but can't hold their boundary against it.",
+        "difficulty": "foundational"
+      },
+      {
+        "id": "cc_sa_cat1_q2",
+        "type": "apply_concept",
+        "stem": "Social Awareness encompasses four sub-dimensions: Communication Patterns, Boundary Recognition, Group Dynamics, and Relational Impact. If you had to choose only one to develop for improving your transmutation capacity, which would give the highest leverage?",
+        "options": [
+          {"key": "a", "text": "Communication Patterns — because all transmutation happens through communication"},
+          {"key": "b", "text": "Relational Impact — because understanding how your patterns affect others is the link between individual awareness and systemic transmutation"},
+          {"key": "c", "text": "Group Dynamics — because transmutation only matters in groups"},
+          {"key": "d", "text": "Boundary Recognition — because boundaries prevent all deprivation"}
+        ],
+        "correct_option": "b",
+        "explanation": "Relational Impact connects individual transmutation to systemic effects. Understanding how your filtering or amplification patterns ripple outward is the bridge between personal awareness and the broader social impact that transmutarianism aims for.",
+        "difficulty": "applied"
+      }
+    ],
+    "your_score": [
+      {
+        "id": "cc_sa_cat2_q1",
+        "type": "apply_concept",
+        "stem": "Your Social Awareness score is 18/25, with Group Dynamics at 9/10 but Boundary Recognition at 2/10. How would you describe this pattern in everyday terms?",
+        "options": [
+          {"key": "a", "text": "You read social situations expertly but sacrifice your own needs to maintain group harmony — you see the dynamics clearly but get swept up in them"},
+          {"key": "b", "text": "You have poor social skills overall"},
+          {"key": "c", "text": "Your high Group Dynamics will compensate for low Boundary Recognition"},
+          {"key": "d", "text": "You should focus on improving Group Dynamics since it's already high"}
+        ],
+        "correct_option": "a",
+        "explanation": "This is a common pattern: excellent perception of social dynamics paired with weak personal boundaries. You understand how groups work but can't hold your own position within them. In transmutarian terms, you see the flows clearly but get absorbed by them rather than choosing your response.",
+        "difficulty": "applied"
+      }
+    ],
+    "daily_effects": [
+      {
+        "id": "cc_sa_cat3_q1",
+        "type": "predict_outcome",
+        "stem": "A person with low Relational Impact awareness consistently gives unsolicited advice to friends. They genuinely believe they're helping. Predict what happens over time in their social network.",
+        "options": [
+          {"key": "a", "text": "Friends appreciate the consistent guidance and seek more advice"},
+          {"key": "b", "text": "Friends gradually distance themselves, but the person doesn't understand why because they can't see how their pattern affects others"},
+          {"key": "c", "text": "The advice improves the friends' transmutation capacity"},
+          {"key": "d", "text": "Nothing changes — unsolicited advice has no relational impact"}
+        ],
+        "correct_option": "b",
+        "explanation": "Low Relational Impact awareness means you don't see how your patterns land on others. The person intends to help but can't perceive that their pattern feels controlling or dismissive. This blind spot erodes relationships without the person understanding the cause — a deprivation they're unknowingly emitting.",
+        "difficulty": "foundational"
+      }
+    ],
+    "strengths_gaps": [
+      {
+        "id": "cc_sa_cat4_q1",
+        "type": "apply_concept",
+        "stem": "Someone with strong Communication Patterns and Boundary Recognition but weak Group Dynamics is placed in a leadership role. What is the most likely challenge they'll face?",
+        "options": [
+          {"key": "a", "text": "They can advocate for themselves clearly but struggle to read the collective mood, missing when the group is confused, resistant, or disengaged"},
+          {"key": "b", "text": "They will communicate too effectively and overwhelm the group"},
+          {"key": "c", "text": "Their strong boundaries will make them an effective leader automatically"},
+          {"key": "d", "text": "They won't face any challenges — two out of four strengths is sufficient"}
+        ],
+        "correct_option": "a",
+        "explanation": "Strong communication and boundaries are individual-facing strengths. Group Dynamics is the collective-facing skill — reading the room's energy, sensing consensus or resistance, timing interventions. Without it, you can speak clearly and hold your ground but miss what the group actually needs.",
+        "difficulty": "applied"
+      }
+    ],
+    "external_interaction": [
+      {
+        "id": "cc_sa_cat5_q1",
+        "type": "predict_outcome",
+        "stem": "A team has one member with extremely high Social Awareness and Transmutation Capacity. The rest of the team has average scores. According to the systemic view, what is the likely effect on team dynamics over time?",
+        "options": [
+          {"key": "a", "text": "No effect — individual scores don't influence groups"},
+          {"key": "b", "text": "The high-capacity member models filtering and emission patterns that others gradually adopt, shifting the team's collective transmutation pattern"},
+          {"key": "c", "text": "The team will resent the high-scoring member"},
+          {"key": "d", "text": "The high-scoring member will absorb all the team's stress and burn out"}
+        ],
+        "correct_option": "b",
+        "explanation": "Transmutation patterns are contagious within social systems. One person consistently modeling filtering (not passing stress forward) and emission (actively sharing fulfillment) creates a template others can adopt. This is the regenerative cascade — building capacity outward, not dependency.",
+        "difficulty": "applied"
+      }
+    ]
+  },
+  "Meta-Cognitive Awareness": {
+    "what_this_means": [
+      {
+        "id": "cc_mca_cat1_q1",
+        "type": "identify_pattern",
+        "stem": "Riley frequently reflects on conversations after they happen, analyzing what they said and how they could have responded differently. However, during conversations, they react impulsively without thinking. What Meta-Cognitive Awareness sub-dimension gap does this reveal?",
+        "options": [
+          {"key": "a", "text": "Riley has strong retrospective Self-Reflection but low real-time meta-cognition — they can analyze their thinking patterns after the fact but not in the moment"},
+          {"key": "b", "text": "Riley has low Meta-Cognitive Awareness overall"},
+          {"key": "c", "text": "Riley has a Bias Detection problem"},
+          {"key": "d", "text": "Riley has low Emotional Awareness, not a meta-cognitive issue"}
+        ],
+        "correct_option": "a",
+        "explanation": "Meta-Cognitive Awareness includes the ability to think about your thinking in real time. Riley demonstrates strong after-the-fact reflection but lacks the in-the-moment awareness to apply that same analysis while the interaction is happening. This is a common developmental gap.",
+        "difficulty": "foundational"
+      },
+      {
+        "id": "cc_mca_cat1_q2",
+        "type": "apply_concept",
+        "stem": "Why is Meta-Cognitive Awareness considered a prerequisite for Transmutation Capacity rather than a component of it?",
+        "options": [
+          {"key": "a", "text": "Because transmutation is purely physical and doesn't involve thinking"},
+          {"key": "b", "text": "Because you need to be able to observe your own patterns of processing before you can choose to change them — seeing the Conduit pattern is prerequisite to breaking it"},
+          {"key": "c", "text": "Because Meta-Cognitive Awareness and Transmutation Capacity are the same thing"},
+          {"key": "d", "text": "Because meta-cognition only matters in academic contexts"}
+        ],
+        "correct_option": "b",
+        "explanation": "The awareness dimensions are the machinery that enables transmutation. Meta-Cognitive Awareness specifically enables you to observe your own processing patterns — to notice when you're in Conduit mode, when you're absorbing, when you're amplifying. Without this self-observation, transmutation is accidental, not intentional.",
+        "difficulty": "foundational"
+      }
+    ],
+    "your_score": [
+      {
+        "id": "cc_mca_cat2_q1",
+        "type": "predict_outcome",
+        "stem": "A user's Meta-Cognitive Awareness is 20/25 but their Transmutation Capacity is 8/25. What does this tell you about where they are in the transmutation development journey?",
+        "options": [
+          {"key": "a", "text": "They are stuck and cannot improve"},
+          {"key": "b", "text": "They have excellent self-observation skills but haven't yet developed the active capacity to transform what they observe — the foundation is strong, the building isn't constructed yet"},
+          {"key": "c", "text": "Their Meta-Cognitive Awareness score must be wrong"},
+          {"key": "d", "text": "They are already a Transmuter who underestimates themselves"}
+        ],
+        "correct_option": "b",
+        "explanation": "This is actually an encouraging pattern. The hardest part — developing self-observation — is already done. The development roadmap can focus directly on translating observation into action: 'You already notice when you're passing stress through. Now let's practice choosing to filter it instead.'",
+        "difficulty": "applied"
+      }
+    ],
+    "daily_effects": [
+      {
+        "id": "cc_mca_cat3_q1",
+        "type": "predict_outcome",
+        "stem": "A person with strong Bias Detection (part of Meta-Cognitive Awareness) is scrolling social media and sees a post that makes them angry. Compared to someone with weak Bias Detection, what is different about their experience?",
+        "options": [
+          {"key": "a", "text": "They don't feel the anger at all"},
+          {"key": "b", "text": "They feel the anger but can also notice: 'I'm having a strong reaction — is this because the post is genuinely outrageous or because it's designed to trigger me?' This meta-awareness creates a choice point"},
+          {"key": "c", "text": "They will immediately share the post to warn others"},
+          {"key": "d", "text": "They will feel more anger than the person with weak Bias Detection"}
+        ],
+        "correct_option": "b",
+        "explanation": "Bias Detection doesn't eliminate emotional reactions — it adds a layer of observation on top. The anger still arises, but the meta-cognitive awareness creates a pause: 'What is shaping this reaction?' That pause is where transmutation becomes possible — it's the gap between stimulus and response.",
+        "difficulty": "foundational"
+      }
+    ],
+    "strengths_gaps": [
+      {
+        "id": "cc_mca_cat4_q1",
+        "type": "apply_concept",
+        "stem": "Perspective Taking (a Meta-Cognitive sub-dimension) and Empathic Attunement (an Emotional Awareness sub-dimension) both involve understanding others. What is the key difference?",
+        "options": [
+          {"key": "a", "text": "There is no meaningful difference"},
+          {"key": "b", "text": "Empathic Attunement is feeling what others feel; Perspective Taking is cognitively modeling how others think — one is emotional, the other is intellectual"},
+          {"key": "c", "text": "Perspective Taking is always more accurate than Empathic Attunement"},
+          {"key": "d", "text": "Empathic Attunement is for strangers; Perspective Taking is for people you know"}
+        ],
+        "correct_option": "b",
+        "explanation": "This distinction matters for transmutation: Empathic Attunement senses the emotional flow from others (and can lead to absorption if unmanaged), while Perspective Taking models others' cognitive frameworks without necessarily absorbing their emotional state. Both contribute to transmutation but through different channels.",
+        "difficulty": "applied"
+      }
+    ],
+    "external_interaction": [
+      {
+        "id": "cc_mca_cat5_q1",
+        "type": "identify_pattern",
+        "stem": "A therapist with high Meta-Cognitive Awareness notices themselves getting frustrated with a client who keeps repeating the same patterns. The therapist catches themselves thinking 'they're not even trying' and recognizes this as countertransference. What happens next in the transmutation framework?",
+        "options": [
+          {"key": "a", "text": "The therapist suppresses the frustration entirely"},
+          {"key": "b", "text": "The meta-cognitive recognition creates a choice point — the therapist can filter the frustration rather than letting it leak into the therapeutic relationship, transforming a potential deprivation flow into continued support"},
+          {"key": "c", "text": "The therapist should refer the client to someone else"},
+          {"key": "d", "text": "Meta-cognitive awareness has no role in professional interactions"}
+        ],
+        "correct_option": "b",
+        "explanation": "Meta-Cognitive Awareness doesn't prevent difficult reactions — it catches them mid-flow. The therapist's ability to notice 'I'm frustrated and that's about me, not them' is the exact moment where Conduit (passing frustration into the session) becomes Transmuter (filtering it and maintaining therapeutic presence).",
+        "difficulty": "applied"
+      }
+    ]
+  },
+  "Flow Awareness": {
+    "what_this_means": [
+      {
+        "id": "cc_fa_cat1_q1",
+        "type": "identify_pattern",
+        "stem": "Kai leaves a conversation feeling drained but can't pinpoint why. The other person seemed fine — even energized. In transmutarian terms, what is Kai missing?",
+        "options": [
+          {"key": "a", "text": "Kai has low Social Awareness — they can't read people"},
+          {"key": "b", "text": "Kai has low Flow Awareness — they can't perceive the movement of fulfillment and deprivation between themselves and others"},
+          {"key": "c", "text": "Kai has low Emotional Regulation — they can't manage their energy"},
+          {"key": "d", "text": "Nothing — some conversations are just tiring"}
+        ],
+        "correct_option": "b",
+        "explanation": "Flow Awareness is the transmutarian dimension that specifically measures your ability to notice fulfillment and deprivation moving between people. Kai experienced an extraction pattern (the other person left energized while Kai was depleted) but couldn't perceive the flow itself. This is distinct from emotional awareness — you can name your emotions without seeing the directional flow.",
+        "reflection_prompt": "Can you recall a recent conversation where you left feeling different from when you started? Could you trace what flowed between you and the other person?",
+        "difficulty": "foundational"
+      },
+      {
+        "id": "cc_fa_cat1_q2",
+        "type": "apply_concept",
+        "stem": "What distinguishes Flow Awareness from Emotional Awareness in the transmutarian framework?",
+        "options": [
+          {"key": "a", "text": "They are the same dimension measured differently"},
+          {"key": "b", "text": "Emotional Awareness identifies what you feel; Flow Awareness tracks the directional movement of fulfillment and deprivation between you and others"},
+          {"key": "c", "text": "Flow Awareness is more important than Emotional Awareness"},
+          {"key": "d", "text": "Emotional Awareness is about others; Flow Awareness is about yourself"}
+        ],
+        "correct_option": "b",
+        "explanation": "Emotional Awareness tells you 'I feel anxious.' Flow Awareness tells you 'Anxiety is flowing from this situation into me, and I'm passing it to my family.' The directional, relational quality is what makes Flow Awareness distinctly transmutarian — it maps the flow, not just the feeling.",
+        "difficulty": "foundational"
+      }
+    ],
+    "your_score": [
+      {
+        "id": "cc_fa_cat2_q1",
+        "type": "predict_outcome",
+        "stem": "A user has high Emotional Awareness (22/25) but low Flow Awareness (8/25). What limitation will they experience in the development phase?",
+        "options": [
+          {"key": "a", "text": "No limitation — Emotional Awareness is sufficient for development"},
+          {"key": "b", "text": "They can identify their emotions precisely but struggle to see how those emotions move through their relationships — they see the static picture but not the dynamics"},
+          {"key": "c", "text": "They will be unable to feel any emotions"},
+          {"key": "d", "text": "They should skip development and go straight to reassessment"}
+        ],
+        "correct_option": "b",
+        "explanation": "This gap means the user can name their internal states with precision but doesn't perceive the relational flow. Development practices will need to specifically target directional awareness: not just 'what am I feeling?' but 'where did this come from and where is it going?'",
+        "difficulty": "applied"
+      }
+    ],
+    "daily_effects": [
+      {
+        "id": "cc_fa_cat3_q1",
+        "type": "identify_pattern",
+        "stem": "After a team celebration, most team members go home energized. One member, Sam, goes home feeling empty despite having participated fully. Sam has high Flow Awareness and recognizes what happened: they were emitting fulfillment to the group while receiving little back. What does Sam's awareness enable?",
+        "options": [
+          {"key": "a", "text": "Nothing — awareness doesn't change the outcome"},
+          {"key": "b", "text": "Sam can now make an informed choice: adjust their emission patterns in group settings, seek reciprocal relationships, or consciously replenish — they can act because they can see the flow"},
+          {"key": "c", "text": "Sam should stop attending celebrations"},
+          {"key": "d", "text": "Sam should lower their fulfillment emission to match the group"}
+        ],
+        "correct_option": "b",
+        "explanation": "Flow Awareness doesn't automatically fix imbalanced flows, but it enables intentional response. Without this awareness, Sam would just feel vaguely tired after celebrations without understanding why. With it, they can strategize — and that strategic capacity is what makes development practices effective.",
+        "difficulty": "applied"
+      }
+    ],
+    "strengths_gaps": [
+      {
+        "id": "cc_fa_cat4_q1",
+        "type": "apply_concept",
+        "stem": "Flow Awareness is one of the three transmutarian dimensions. Why is it positioned as foundational to the other two (Transmutation Capacity and Systemic Awareness)?",
+        "options": [
+          {"key": "a", "text": "It was added first chronologically"},
+          {"key": "b", "text": "You cannot transform flows you cannot perceive, and you cannot see systemic patterns without first seeing individual flows — perception precedes transformation precedes systemic understanding"},
+          {"key": "c", "text": "Flow Awareness is the hardest to develop"},
+          {"key": "d", "text": "It isn't foundational — all three are independent"}
+        ],
+        "correct_option": "b",
+        "explanation": "The three transmutarian dimensions form a perceptual hierarchy: Flow Awareness (see the flows) enables Transmutation Capacity (transform the flows) which enables Systemic Awareness (see how transformations ripple through networks). Each layer depends on the one before it.",
+        "difficulty": "foundational"
+      }
+    ],
+    "external_interaction": [
+      {
+        "id": "cc_fa_cat5_q1",
+        "type": "predict_outcome",
+        "stem": "Two close friends both develop high Flow Awareness. They can now perceive fulfillment and deprivation flows between them in real time. Predict how this changes their relationship.",
+        "options": [
+          {"key": "a", "text": "The relationship becomes uncomfortable because they see too much"},
+          {"key": "b", "text": "Mutual flow awareness enables them to co-regulate — they can notice and name imbalances ('I realize I've been venting without asking how you are') and adjust in real time"},
+          {"key": "c", "text": "It has no effect on the relationship"},
+          {"key": "d", "text": "They will stop being friends because they see each other's flaws"}
+        ],
+        "correct_option": "b",
+        "explanation": "Mutual flow awareness transforms relationships from unconscious patterns to conscious co-creation. When both people can see the flows, they can negotiate them: 'I need to vent for five minutes, then I want to hear about your day.' This is collaborative transmutation — building capacity together.",
+        "difficulty": "applied"
+      }
+    ]
+  },
+  "Systemic Awareness": {
+    "what_this_means": [
+      {
+        "id": "cc_sys_cat1_q1",
+        "type": "identify_pattern",
+        "stem": "A manager notices that whenever they're stressed, their direct reports become stressed, then those reports' teams become stressed. They can see this cascade happening in real time. What transmutarian dimension is this person demonstrating?",
+        "options": [
+          {"key": "a", "text": "Emotional Awareness — they recognize stress in themselves and others"},
+          {"key": "b", "text": "Flow Awareness — they see deprivation moving between themselves and their reports"},
+          {"key": "c", "text": "Systemic Awareness — they see how their transmutation patterns ripple through multiple layers of their social network"},
+          {"key": "d", "text": "Social Awareness — they understand group dynamics"}
+        ],
+        "correct_option": "c",
+        "explanation": "Systemic Awareness goes beyond Flow Awareness (which tracks flows between individuals) to perceive how patterns cascade through networks and across generations. The manager isn't just seeing 'I'm stressed → they're stressed' but 'my stress pattern propagates through three organizational layers.' That's systemic perception.",
+        "difficulty": "foundational"
+      },
+      {
+        "id": "cc_sys_cat1_q2",
+        "type": "apply_concept",
+        "stem": "Systemic Awareness includes understanding intergenerational transmission. In the transmutarian framework, what does intergenerational transmission specifically refer to?",
+        "options": [
+          {"key": "a", "text": "Genetic inheritance of personality traits"},
+          {"key": "b", "text": "The passing of transmutation patterns (filtering, amplifying, absorbing, extracting) from caregivers to children through modeling — not genetics, but learned patterns of processing deprivation and fulfillment"},
+          {"key": "c", "text": "Teaching children about transmutarianism explicitly"},
+          {"key": "d", "text": "The tendency for each generation to be more aware than the last"}
+        ],
+        "correct_option": "b",
+        "explanation": "Intergenerational transmission in the transmutarian framework is about learned patterns, not genetics. A parent who absorbs deprivation models Absorption for their children. A parent who filters and transforms models Transmutation. The cycle either perpetuates or breaks depending on the patterns children internalize.",
+        "reflection_prompt": "What transmutation patterns did you observe in your caregivers? Can you identify which of those patterns you've adopted in your own life?",
+        "difficulty": "foundational"
+      }
+    ],
+    "your_score": [
+      {
+        "id": "cc_sys_cat2_q1",
+        "type": "apply_concept",
+        "stem": "A user has strong individual dimension scores (high Emotional, Social, and Meta-Cognitive Awareness, decent Transmutation Capacity) but their Systemic Awareness is very low. What does this pattern suggest about their transmutation impact?",
+        "options": [
+          {"key": "a", "text": "They are already having maximum positive impact"},
+          {"key": "b", "text": "They can transmute effectively in individual interactions but are blind to how their patterns ripple through broader systems — their impact may be larger (or more problematic) than they realize"},
+          {"key": "c", "text": "Systemic Awareness doesn't matter if individual scores are high"},
+          {"key": "d", "text": "Their individual scores must be inaccurate"}
+        ],
+        "correct_option": "b",
+        "explanation": "Individual transmutation without systemic awareness is like being a skilled swimmer who doesn't understand currents. You can transform flows in direct interactions but can't see how your patterns cascade through your network. Development practices should expand perception from individual to systemic.",
+        "difficulty": "applied"
+      }
+    ],
+    "daily_effects": [
+      {
+        "id": "cc_sys_cat3_q1",
+        "type": "predict_outcome",
+        "stem": "A teacher with high Systemic Awareness realizes that their classroom reward system — intended to motivate — is actually creating an Extractor dynamic where students compete for limited praise rather than supporting each other. What advantage does their systemic perception give them?",
+        "options": [
+          {"key": "a", "text": "None — the reward system is working as designed"},
+          {"key": "b", "text": "They can redesign the system to foster mutual support rather than competition, because they see the systemic pattern the individual interactions create"},
+          {"key": "c", "text": "They should remove all rewards and praise"},
+          {"key": "d", "text": "They can only observe the problem, not fix it"}
+        ],
+        "correct_option": "b",
+        "explanation": "Systemic Awareness enables you to see how individual interactions aggregate into patterns. The teacher doesn't just see 'Student A is competitive' — they see 'the reward structure creates extraction dynamics at the system level.' This perception enables systemic intervention, not just individual coaching.",
+        "difficulty": "applied"
+      }
+    ],
+    "strengths_gaps": [
+      {
+        "id": "cc_sys_cat4_q1",
+        "type": "predict_outcome",
+        "stem": "A person develops strong Systemic Awareness but still has low Transmutation Capacity. They can see exactly how deprivation cascades through their family, workplace, and community. What is the psychological risk of this combination?",
+        "options": [
+          {"key": "a", "text": "No risk — seeing systems clearly is always beneficial"},
+          {"key": "b", "text": "Systemic perception without transformation capacity can lead to overwhelm or helplessness — you see the cascading patterns clearly but feel unable to interrupt them"},
+          {"key": "c", "text": "They will automatically develop Transmutation Capacity from the awareness"},
+          {"key": "d", "text": "They should reduce their Systemic Awareness to feel better"}
+        ],
+        "correct_option": "b",
+        "explanation": "This is why the transmutarian framework emphasizes that awareness without capacity is incomplete. Seeing systemic patterns without the tools to intervene can be paralyzing. The development roadmap addresses this by building transformation capacity alongside systemic perception.",
+        "difficulty": "applied"
+      }
+    ],
+    "external_interaction": [
+      {
+        "id": "cc_sys_cat5_q1",
+        "type": "apply_concept",
+        "stem": "The transmutarian framework's 'regenerative focus' (Section 6.13) states that the goal is to build independent capacity, not platform dependency. How does this principle apply to the education and development phases?",
+        "options": [
+          {"key": "a", "text": "Users should use the platform as much as possible for maximum benefit"},
+          {"key": "b", "text": "The system is designed so you need it less over time — education teaches you to see your own patterns, development gives you practices you can do independently, and graduation marks the point where you've internalized the capacity"},
+          {"key": "c", "text": "The platform should replace the user's existing support systems"},
+          {"key": "d", "text": "Regenerative focus means the platform regenerates your scores automatically"}
+        ],
+        "correct_option": "b",
+        "explanation": "The regenerative principle is anti-dependency by design. Each phase builds capacity the user takes with them: education develops perception, development builds practice habits, graduation confirms independence. The check-in system exists for periodic recalibration, not ongoing dependency. The platform's success is measured by how unnecessary it becomes.",
+        "difficulty": "foundational"
+      }
+    ]
+  }
+}
