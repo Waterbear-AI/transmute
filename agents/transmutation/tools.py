@@ -616,20 +616,25 @@ def generate_profile_snapshot(user_id: str) -> dict[str, Any]:
     chart_png = generate_spider_chart(result["dimensions"])
 
     # Store in module-level cache for save_profile_snapshot to retrieve
+    flow_profile = result.get("flow_profile")
     _profile_cache[user_id] = {
         "scores": result["dimensions"],
         "quadrant": result["quadrant"],
         "insufficient_dimensions": result["insufficient_dimensions"],
         "spider_chart": chart_png,
+        "flow_profile": flow_profile,
     }
 
     # Return data for LLM interpretation (no binary blob)
-    return {
+    response = {
         "scores": result["dimensions"],
         "quadrant": result["quadrant"],
         "insufficient_dimensions": result["insufficient_dimensions"],
         "has_spider_chart": True,
     }
+    if flow_profile:
+        response["flow_data"] = flow_profile.model_dump()
+    return response
 
 
 # Temporary cache for profile data between generate and save calls
@@ -663,10 +668,14 @@ def save_profile_snapshot(user_id: str, interpretation: str) -> dict[str, Any]:
         ).fetchone()
         session_id = session_row["session_id"] if session_row else None
 
+        # Serialize flow data if present
+        flow_profile = cached.get("flow_profile")
+        flow_data_json = flow_profile.model_dump_json() if flow_profile else None
+
         conn.execute(
             """INSERT INTO profile_snapshots
-               (id, user_id, session_id, scores, quadrant_placement, spider_chart, interpretation, previous_snapshot_id, created_at)
-               VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+               (id, user_id, session_id, scores, quadrant_placement, spider_chart, interpretation, previous_snapshot_id, created_at, flow_data)
+               VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
             (
                 snapshot_id,
                 user_id,
@@ -677,8 +686,25 @@ def save_profile_snapshot(user_id: str, interpretation: str) -> dict[str, Any]:
                 interpretation,
                 prev_id,
                 datetime.utcnow().isoformat(),
+                flow_data_json,
             ),
         )
+
+        # Persist moral capital/debt to moral_ledger
+        if flow_profile:
+            conn.execute(
+                """INSERT INTO moral_ledger
+                   (id, user_id, snapshot_id, c_plus, c_minus, created_at)
+                   VALUES (?, ?, ?, ?, ?, ?)""",
+                (
+                    str(uuid.uuid4()),
+                    user_id,
+                    snapshot_id,
+                    flow_profile.moral_capital,
+                    flow_profile.moral_debt,
+                    datetime.utcnow().isoformat(),
+                ),
+            )
 
     return {
         "event_type": "profile.snapshot",
