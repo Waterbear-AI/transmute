@@ -74,6 +74,10 @@ const Chat = (() => {
         if (_abortController) _abortController.abort();
         _abortController = new AbortController();
 
+        const timeoutWarning = setTimeout(() => {
+            Toast.show('Still waiting for a response... this is taking longer than usual.', 'warning');
+        }, 15000);
+
         try {
             const res = await fetch('/api/chat/' + encodeURIComponent(sessionId), {
                 method: 'POST',
@@ -101,6 +105,7 @@ const Chat = (() => {
                 });
             }
         } finally {
+            clearTimeout(timeoutWarning);
             _abortController = null;
         }
     }

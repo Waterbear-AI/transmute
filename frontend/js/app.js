@@ -86,8 +86,29 @@ const App = (() => {
         _currentSessionId = id;
     }
 
+    function _initOfflineDetection() {
+        let offlineToastEl = null;
+
+        window.addEventListener('offline', () => {
+            offlineToastEl = Toast.show('You are offline. Changes may not be saved.', 'warning');
+        });
+
+        window.addEventListener('online', () => {
+            if (offlineToastEl) {
+                offlineToastEl.remove();
+                offlineToastEl = null;
+            }
+            Toast.show('Connection restored', 'success');
+        });
+
+        if (!navigator.onLine) {
+            offlineToastEl = Toast.show('You are offline. Changes may not be saved.', 'warning');
+        }
+    }
+
     async function init() {
         Toast.init();
+        _initOfflineDetection();
         Auth.setAuthChangeCallback(handleAuthChange);
         const user = await Auth.checkSession();
         if (user) {

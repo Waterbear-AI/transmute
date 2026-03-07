@@ -92,6 +92,8 @@ const Toast = (() => {
         if (duration) {
             entry.timerId = setTimeout(() => _dismiss(el), duration);
         }
+
+        return el;
     }
 
     function _dismiss(el) {
