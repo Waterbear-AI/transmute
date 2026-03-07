@@ -53,7 +53,7 @@ class TestMigrationRunner:
             db_path = f.name
         try:
             count = run_migrations(db_path=db_path)
-            assert count == 1
+            assert count == 2
 
             import sqlite3
             conn = sqlite3.connect(db_path)
@@ -67,7 +67,8 @@ class TestMigrationRunner:
             assert "users" in tables
             assert "assessment_state" in tables
             assert "schema_version" in tables
-            assert len(tables) == 11
+            assert "moral_ledger" in tables
+            assert len(tables) == 12
         finally:
             os.unlink(db_path)
 
