@@ -862,6 +862,96 @@ body {
     color: var(--color-text);
 }
 
+/* ── Phase Stepper ─────────────────────────── */
+
+.phase-stepper {
+    padding: 8px 12px 4px;
+    border-bottom: 1px solid var(--color-border);
+}
+
+.phase-stepper__progress {
+    display: block;
+    font-size: 10px;
+    color: var(--color-text-muted);
+    margin-bottom: 6px;
+    text-transform: uppercase;
+    letter-spacing: 0.05em;
+}
+
+.phase-stepper__track {
+    display: flex;
+    align-items: flex-start;
+    gap: 0;
+}
+
+.phase-stepper__step {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    flex-shrink: 0;
+}
+
+.phase-stepper__dot {
+    width: 14px;
+    height: 14px;
+    border-radius: 50%;
+    border: 2px solid var(--color-border);
+    background: transparent;
+    cursor: default;
+    padding: 0;
+    transition: transform 0.15s;
+}
+
+.phase-stepper__dot--completed {
+    cursor: pointer;
+}
+
+.phase-stepper__dot--completed:hover {
+    transform: scale(1.25);
+}
+
+.phase-stepper__dot--current {
+    animation: stepper-pulse 2s ease-in-out infinite;
+}
+
+@keyframes stepper-pulse {
+    0%, 100% { opacity: 1; }
+    50% { opacity: 0.5; }
+}
+
+.phase-stepper__dot--upcoming {
+    opacity: 0.35;
+}
+
+.phase-stepper__label {
+    font-size: 9px;
+    color: var(--color-text-muted);
+    margin-top: 3px;
+    white-space: nowrap;
+    max-width: 56px;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    text-align: center;
+}
+
+.phase-stepper__label--current {
+    color: var(--color-text);
+    font-weight: 600;
+}
+
+.phase-stepper__line {
+    flex: 1;
+    height: 2px;
+    min-width: 12px;
+    background: var(--color-border);
+    margin-top: 6px;
+    align-self: flex-start;
+}
+
+.phase-stepper__line--filled {
+    background: var(--color-text-muted);
+}
+
 /* ── Responsive ─────────────────────────────── */
 
 @media (max-width: 768px) {
@@ -877,5 +967,29 @@ body {
 
     .panel-results {
         flex: 1;
+    }
+
+    .phase-stepper__track {
+        flex-direction: column;
+        align-items: flex-start;
+    }
+
+    .phase-stepper__step {
+        flex-direction: row;
+        gap: 8px;
+    }
+
+    .phase-stepper__line {
+        width: 2px;
+        height: 10px;
+        min-width: unset;
+        margin-top: 0;
+        margin-left: 6px;
+        align-self: auto;
+    }
+
+    .phase-stepper__label {
+        margin-top: 0;
+        max-width: none;
     }
 }

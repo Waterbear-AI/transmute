@@ -113,6 +113,20 @@ const Results = (() => {
         const tabsEl = document.getElementById('results-tabs');
         tabsEl.textContent = '';
 
+        // Phase stepper above tabs
+        const headerEl = document.getElementById('results-header');
+        let stepperContainer = headerEl.querySelector('.phase-stepper-container');
+        if (!stepperContainer) {
+            stepperContainer = document.createElement('div');
+            stepperContainer.className = 'phase-stepper-container';
+            headerEl.insertBefore(stepperContainer, tabsEl);
+        }
+        if (typeof PhaseStepper !== 'undefined') {
+            PhaseStepper.render(stepperContainer, _currentPhase, (phaseId) => {
+                _switchTab(phaseId);
+            });
+        }
+
         for (const tab of TABS) {
             if (!_isTabVisible(tab)) continue;
 
