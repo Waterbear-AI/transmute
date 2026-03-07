@@ -6,7 +6,9 @@ All calculations are pure functions — no DB access, no side effects.
 
 from typing import Any, Optional
 
+from agents.transmutation.flow_engine import compute_full_profile
 from agents.transmutation.question_bank import get_question_bank
+from config import get_settings
 
 # Archetype thresholds on the 2-axis model.
 # X-axis: deprivation handling (negative = filters, positive = amplifies)
@@ -38,10 +40,20 @@ def score_responses(
         if data.get("insufficient_data")
     ]
 
+    # Compute flow-based moral profile (parallel to dimension scoring)
+    settings = get_settings()
+    flow_profile = compute_full_profile(
+        scenario_responses=scenario_responses,
+        scenarios=qb.get_all_scenarios(),
+        tau=settings.transmutation.tau,
+        weights=settings.transmutation.maslow_weights,
+    )
+
     return {
         "dimensions": dim_scores,
         "insufficient_dimensions": insufficient,
         "quadrant": quadrant,
+        "flow_profile": flow_profile,
     }
 
 
