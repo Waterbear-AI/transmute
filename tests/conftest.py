@@ -32,6 +32,8 @@ def reset_db():
         "SELECT name FROM sqlite_master WHERE type='table'"
     ).fetchall()]
     for table in tables:
+        if table == "sqlite_sequence":
+            continue
         conn.execute(f"DROP TABLE IF EXISTS [{table}]")
     conn.commit()
     conn.close()
