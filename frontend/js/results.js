@@ -18,9 +18,28 @@ const Results = (() => {
 
     /**
      * Update the results panel with data from /api/results/{user_id}.
+     * Maps API response keys to internal data keys used by tabs.
      */
     function update(data, currentPhase) {
-        _resultsData = data || {};
+        const d = data || {};
+        _resultsData = {};
+
+        // Map API response to internal data keys
+        if (d.assessment && d.assessment.exists) _resultsData.assessment_state = d.assessment;
+        if (d.latest_profile) _resultsData.profile_snapshots = d.latest_profile;
+        if (d.education && d.education.exists) _resultsData.education_progress = d.education;
+        if (d.development && d.development.has_roadmap) _resultsData.development_roadmap = d.development;
+        if (d.graduation && d.graduation.exists) _resultsData.graduation_data = d.graduation;
+        if (d.check_ins && d.check_ins.count > 0) _resultsData.comparison_snapshots = d.check_ins;
+
+        // Also accept pre-mapped data from SSE (passthrough)
+        if (d.assessment_state) _resultsData.assessment_state = d.assessment_state;
+        if (d.profile_snapshots) _resultsData.profile_snapshots = d.profile_snapshots;
+        if (d.education_progress) _resultsData.education_progress = d.education_progress;
+        if (d.development_roadmap) _resultsData.development_roadmap = d.development_roadmap;
+        if (d.graduation_data) _resultsData.graduation_data = d.graduation_data;
+        if (d.comparison_snapshots) _resultsData.comparison_snapshots = d.comparison_snapshots;
+
         _currentPhase = currentPhase || 'orientation';
         _renderTabs();
         _switchTab(_currentPhase);
@@ -57,6 +76,15 @@ const Results = (() => {
                 _resultsData.education_progress = data;
                 if (_activeTab === 'education') _renderTabContent('education');
                 _renderTabs();
+                break;
+
+            case 'education.comprehension':
+                // Comprehension events carry score updates — merge into education data
+                if (_resultsData.education_progress && data.progress) {
+                    _resultsData.education_progress.progress = data.progress;
+                    _resultsData.education_progress.summary = data.summary || _resultsData.education_progress.summary;
+                }
+                if (_activeTab === 'education') _renderTabContent('education');
                 break;
 
             case 'development.roadmap':
@@ -250,25 +278,219 @@ const Results = (() => {
     function _renderEducation(el) {
         const data = _resultsData.education_progress;
         if (!data) return;
-        _renderPlaceholder(el, 'Education', 'Education progress and comprehension scores will appear here.');
+
+        const header = document.createElement('h3');
+        Sanitize.setText(header, 'Education Progress');
+        el.appendChild(header);
+
+        // Summary section
+        const summary = data.summary || {};
+        if (summary.total_categories) {
+            const sumEl = document.createElement('div');
+            sumEl.className = 'results-summary';
+            sumEl.style.margin = '12px 0';
+            const completed = summary.completed_categories || 0;
+            const total = summary.total_categories || 0;
+            const pct = summary.completion_pct || (total > 0 ? Math.round(completed / total * 100) : 0);
+            Sanitize.setText(sumEl, completed + ' / ' + total + ' categories completed (' + pct + '%)');
+            el.appendChild(sumEl);
+            el.appendChild(_createProgressBar(total > 0 ? completed / total : 0));
+        }
+
+        // Per-dimension breakdown
+        const progress = data.progress || {};
+        const dims = Object.keys(progress);
+        if (dims.length > 0) {
+            const dimHeader = document.createElement('h4');
+            dimHeader.style.marginTop = '16px';
+            Sanitize.setText(dimHeader, 'By Dimension');
+            el.appendChild(dimHeader);
+
+            for (const dim of dims) {
+                const cats = progress[dim] || {};
+                const dimEl = document.createElement('div');
+                dimEl.className = 'results-dimension';
+                dimEl.style.margin = '12px 0';
+
+                const dimLabel = document.createElement('strong');
+                Sanitize.setText(dimLabel, dim);
+                dimEl.appendChild(dimLabel);
+
+                for (const [catName, catData] of Object.entries(cats)) {
+                    const catEl = document.createElement('div');
+                    catEl.style.margin = '4px 0 4px 12px';
+                    const score = catData.understanding_score || 0;
+                    const label = catName.replace(/_/g, ' ');
+                    Sanitize.setText(catEl, label + ': ' + score + '%');
+                    dimEl.appendChild(catEl);
+                    dimEl.appendChild(_createProgressBar(score / 100));
+                }
+
+                el.appendChild(dimEl);
+            }
+        }
     }
 
     function _renderDevelopment(el) {
         const data = _resultsData.development_roadmap;
         if (!data) return;
-        _renderPlaceholder(el, 'Development', 'Your development roadmap and practice log will appear here.');
+
+        const header = document.createElement('h3');
+        Sanitize.setText(header, 'Development');
+        el.appendChild(header);
+
+        // Practice count
+        const practiceCount = data.practice_count || 0;
+        const countEl = document.createElement('div');
+        countEl.style.margin = '12px 0';
+        Sanitize.setText(countEl, 'Practice entries: ' + practiceCount + ' / 10');
+        el.appendChild(countEl);
+        el.appendChild(_createProgressBar(Math.min(practiceCount / 10, 1)));
+
+        // Roadmap
+        const roadmap = data.roadmap;
+        if (roadmap) {
+            const rmHeader = document.createElement('h4');
+            rmHeader.style.marginTop = '16px';
+            Sanitize.setText(rmHeader, 'Current Roadmap');
+            el.appendChild(rmHeader);
+
+            if (data.roadmap_created_at) {
+                const dateEl = document.createElement('div');
+                dateEl.style.color = 'var(--color-text-muted)';
+                dateEl.style.fontSize = '13px';
+                dateEl.style.marginBottom = '8px';
+                Sanitize.setText(dateEl, 'Created: ' + new Date(data.roadmap_created_at).toLocaleDateString());
+                el.appendChild(dateEl);
+            }
+
+            const steps = roadmap.steps || roadmap;
+            if (Array.isArray(steps)) {
+                const ol = document.createElement('ol');
+                ol.style.paddingLeft = '20px';
+                for (const step of steps) {
+                    const li = document.createElement('li');
+                    li.style.margin = '8px 0';
+                    li.style.lineHeight = '1.5';
+                    const text = typeof step === 'string' ? step : (step.title || step.description || JSON.stringify(step));
+                    Sanitize.setText(li, text);
+                    ol.appendChild(li);
+                }
+                el.appendChild(ol);
+            }
+        }
     }
 
     function _renderReassessment(el) {
         const data = _resultsData.comparison_snapshots;
         if (!data) return;
-        _renderPlaceholder(el, 'Reassessment', 'Score comparisons and movement tracking will appear here.');
+
+        const header = document.createElement('h3');
+        Sanitize.setText(header, 'Reassessment / Check-in');
+        el.appendChild(header);
+
+        // If this is check-in data (from API response)
+        if (data.count !== undefined) {
+            const countEl = document.createElement('div');
+            countEl.style.margin = '12px 0';
+            Sanitize.setText(countEl, 'Check-ins completed: ' + data.count);
+            el.appendChild(countEl);
+
+            if (data.latest_regression !== null && data.latest_regression !== undefined) {
+                const regEl = document.createElement('div');
+                regEl.style.margin = '8px 0';
+                regEl.style.color = data.latest_regression ? 'var(--color-warning)' : 'var(--color-success, #4caf50)';
+                Sanitize.setText(regEl, data.latest_regression ? 'Latest: Regression detected' : 'Latest: No regression');
+                el.appendChild(regEl);
+            }
+
+            if (data.latest_created_at) {
+                const dateEl = document.createElement('div');
+                dateEl.style.color = 'var(--color-text-muted)';
+                dateEl.style.fontSize = '13px';
+                Sanitize.setText(dateEl, 'Last check-in: ' + new Date(data.latest_created_at).toLocaleDateString());
+                el.appendChild(dateEl);
+            }
+            return;
+        }
+
+        // SSE comparison data (deltas)
+        if (data.deltas) {
+            const deltaHeader = document.createElement('h4');
+            deltaHeader.style.marginTop = '12px';
+            Sanitize.setText(deltaHeader, 'Score Changes');
+            el.appendChild(deltaHeader);
+
+            for (const [dim, delta] of Object.entries(data.deltas)) {
+                const row = document.createElement('div');
+                row.style.margin = '6px 0';
+                const arrow = delta.direction === 'up' ? '\u2191' : delta.direction === 'down' ? '\u2193' : '\u2194';
+                const color = delta.direction === 'up' ? 'var(--color-success, #4caf50)' : delta.direction === 'down' ? 'var(--color-warning)' : 'inherit';
+                row.style.color = color;
+                Sanitize.setText(row, dim + ': ' + arrow + ' ' + (delta.delta > 0 ? '+' : '') + delta.delta + '%');
+                el.appendChild(row);
+            }
+        }
+
+        if (data.quadrant_shift && data.quadrant_shift.shifted) {
+            const shiftEl = document.createElement('div');
+            shiftEl.style.margin = '12px 0';
+            shiftEl.style.fontWeight = '600';
+            Sanitize.setText(shiftEl, 'Quadrant shift: ' + (data.quadrant_shift.from || '?') + ' \u2192 ' + (data.quadrant_shift.to || '?'));
+            el.appendChild(shiftEl);
+        }
     }
 
     function _renderGraduation(el) {
         const data = _resultsData.graduation_data;
         if (!data) return;
-        _renderPlaceholder(el, 'Graduation', 'Your journey timeline and graduation summary will appear here.');
+
+        const header = document.createElement('h3');
+        Sanitize.setText(header, 'Graduation');
+        el.appendChild(header);
+
+        if (data.created_at) {
+            const dateEl = document.createElement('div');
+            dateEl.style.margin = '8px 0';
+            dateEl.style.color = 'var(--color-text-muted)';
+            dateEl.style.fontSize = '13px';
+            Sanitize.setText(dateEl, 'Graduated: ' + new Date(data.created_at).toLocaleDateString());
+            el.appendChild(dateEl);
+        }
+
+        // Pattern narrative
+        if (data.pattern_narrative) {
+            const narHeader = document.createElement('h4');
+            narHeader.style.marginTop = '12px';
+            Sanitize.setText(narHeader, 'Your Pattern Narrative');
+            el.appendChild(narHeader);
+
+            const narEl = document.createElement('p');
+            narEl.style.margin = '8px 0';
+            narEl.style.lineHeight = '1.6';
+            Sanitize.setText(narEl, data.pattern_narrative);
+            el.appendChild(narEl);
+        }
+
+        // Graduation indicators
+        const indicators = data.graduation_indicators;
+        if (indicators) {
+            const indHeader = document.createElement('h4');
+            indHeader.style.marginTop = '16px';
+            Sanitize.setText(indHeader, 'Convergence Indicators');
+            el.appendChild(indHeader);
+
+            for (const [name, ind] of Object.entries(indicators)) {
+                const row = document.createElement('div');
+                row.style.margin = '6px 0';
+                const label = name.replace(/_/g, ' ');
+                const status = ind.met ? '\u2713' : '\u2717';
+                const color = ind.met ? 'var(--color-success, #4caf50)' : 'var(--color-text-muted)';
+                row.style.color = color;
+                Sanitize.setText(row, status + ' ' + label + (ind.evidence ? ' — ' + ind.evidence : ''));
+                el.appendChild(row);
+            }
+        }
     }
 
     function _renderPlaceholder(el, title, description) {
