@@ -1,7 +1,8 @@
-"""Integration tests for flow data persistence through profile snapshots.
+"""Integration tests for flow data persistence and comparison snapshot deltas.
 
 Validates the Service+DB boundary: generate_profile_snapshot() and
 save_profile_snapshot() correctly persist flow_data JSON and moral_ledger entries.
+Also validates generate_comparison_snapshot() returns accurate flow deltas.
 """
 
 import json
@@ -11,6 +12,7 @@ import sqlite3
 import pytest
 
 from agents.transmutation.tools import (
+    generate_comparison_snapshot,
     generate_profile_snapshot,
     save_profile_snapshot,
     _profile_cache,
@@ -46,11 +48,13 @@ def _insert_assessment(conn, user_id, responses, scenario_responses):
     conn.commit()
 
 
-def _build_scenario_responses():
+def _build_scenario_responses(archetype="transmuter"):
     """Build scenario responses covering all 5 Maslow levels.
 
-    Uses transmuter archetype for clear, predictable flow values:
-    transmuter → D+out=1, D-in=1 → F=1, A=1 → M=2 per level.
+    Args:
+        archetype: Which archetype weight to assign. Default "transmuter".
+            transmuter → D+out=1, D-in=1 → F=1, A=1 → M=2 per level.
+            absorber → D+in=1, D-in=1 → F=1, A=-1 → M=0 per level (tau=1).
     """
     from agents.transmutation.question_bank import get_question_bank
 
@@ -63,10 +67,9 @@ def _build_scenario_responses():
         choices = sc.get("choices", [])
         if not choices:
             continue
-        # Pick first choice and assign transmuter weight
         responses[sc_id] = {
             "choice": choices[0]["key"],
-            "quadrant_weight": {"transmuter": 1.0},
+            "quadrant_weight": {archetype: 1.0},
         }
     return responses
 
@@ -346,3 +349,151 @@ class TestFlowDataEdgeCases:
         flow = MoralProfile.model_validate_json(row["flow_data"])
         assert ledger["c_plus"] == flow.moral_capital
         assert ledger["c_minus"] == flow.moral_debt
+
+
+def _create_snapshot(user_id, archetype="transmuter", interpretation="test"):
+    """Helper: create assessment → generate → save → return snapshot_id."""
+    db_path = os.environ["DB_PATH"]
+    conn = sqlite3.connect(db_path)
+    conn.row_factory = sqlite3.Row
+
+    # Delete previous assessment so generate picks up new one
+    conn.execute("DELETE FROM assessment_state WHERE user_id = ?", (user_id,))
+    conn.commit()
+
+    _insert_assessment(conn, user_id, _build_likert_responses(), _build_scenario_responses(archetype))
+    conn.close()
+
+    generate_profile_snapshot(user_id)
+    result = save_profile_snapshot(user_id, interpretation)
+    return result["snapshot_id"]
+
+
+class TestComparisonSnapshotDeltas:
+    """Verify generate_comparison_snapshot() returns accurate flow deltas."""
+
+    def test_comparison_includes_flow_deltas(self):
+        """Two snapshots with different archetypes produce non-zero flow deltas."""
+        user_id = "comparison-user"
+        db_path = os.environ["DB_PATH"]
+        conn = sqlite3.connect(db_path)
+        conn.row_factory = sqlite3.Row
+        _insert_user(conn, user_id)
+        conn.close()
+
+        # First snapshot: transmuter (F>0, A>0)
+        first_id = _create_snapshot(user_id, archetype="transmuter", interpretation="First")
+
+        # Second snapshot: absorber (F>0, A<0 — different moral work)
+        second_id = _create_snapshot(user_id, archetype="absorber", interpretation="Second")
+
+        # Compare second (current) against first (previous)
+        comparison = generate_comparison_snapshot(user_id, first_id)
+        assert "error" not in comparison
+        assert "flow_deltas" in comparison
+
+        flow_deltas = comparison["flow_deltas"]
+
+        # Verify structure
+        assert "moral_work" in flow_deltas
+        assert "weighted_total" in flow_deltas
+        assert "moral_capital" in flow_deltas
+        assert "moral_debt" in flow_deltas
+
+        # Verify moral_work delta structure
+        mw = flow_deltas["moral_work"]
+        assert "previous" in mw
+        assert "current" in mw
+        assert "delta" in mw
+        assert len(mw["delta"]) == 5
+
+        # Transmuter vs absorber should produce different M vectors → non-zero deltas
+        assert any(d != 0 for d in mw["delta"])
+
+        # weighted_total should differ
+        assert flow_deltas["weighted_total"]["delta"] != 0
+
+    def test_comparison_delta_values_are_correct(self):
+        """Verify delta = current - previous for all flow metrics."""
+        user_id = "delta-math-user"
+        db_path = os.environ["DB_PATH"]
+        conn = sqlite3.connect(db_path)
+        conn.row_factory = sqlite3.Row
+        _insert_user(conn, user_id)
+        conn.close()
+
+        first_id = _create_snapshot(user_id, archetype="transmuter")
+        second_id = _create_snapshot(user_id, archetype="absorber")
+
+        comparison = generate_comparison_snapshot(user_id, first_id)
+        flow_deltas = comparison["flow_deltas"]
+
+        # Verify delta = current - previous for weighted_total
+        wt = flow_deltas["weighted_total"]
+        assert wt["delta"] == round(wt["current"] - wt["previous"], 4)
+
+        # Verify delta = current - previous for moral_capital
+        mc = flow_deltas["moral_capital"]
+        assert mc["delta"] == round(mc["current"] - mc["previous"], 4)
+
+        # Verify delta = current - previous for moral_debt
+        md = flow_deltas["moral_debt"]
+        assert md["delta"] == round(md["current"] - md["previous"], 4)
+
+        # Verify moral_work vector deltas
+        mw = flow_deltas["moral_work"]
+        for i, d in enumerate(mw["delta"]):
+            assert d == round(mw["current"][i] - mw["previous"][i], 4)
+
+    def test_identical_snapshots_produce_zero_deltas(self):
+        """Comparing two identical-archetype snapshots yields zero flow deltas."""
+        user_id = "identical-user"
+        db_path = os.environ["DB_PATH"]
+        conn = sqlite3.connect(db_path)
+        conn.row_factory = sqlite3.Row
+        _insert_user(conn, user_id)
+        conn.close()
+
+        first_id = _create_snapshot(user_id, archetype="transmuter")
+        second_id = _create_snapshot(user_id, archetype="transmuter")
+
+        comparison = generate_comparison_snapshot(user_id, first_id)
+        assert "flow_deltas" in comparison
+
+        flow_deltas = comparison["flow_deltas"]
+
+        # All moral_work deltas should be zero
+        assert all(d == 0 for d in flow_deltas["moral_work"]["delta"])
+        assert flow_deltas["weighted_total"]["delta"] == 0
+        assert flow_deltas["moral_capital"]["delta"] == 0
+        assert flow_deltas["moral_debt"]["delta"] == 0
+
+    def test_comparison_without_flow_data_omits_flow_deltas(self):
+        """Snapshots without flow_data should not include flow_deltas key."""
+        user_id = "no-flow-user"
+        db_path = os.environ["DB_PATH"]
+        conn = sqlite3.connect(db_path)
+        conn.row_factory = sqlite3.Row
+        _insert_user(conn, user_id)
+
+        # Manually insert snapshots without flow_data
+        import uuid
+        from datetime import datetime
+
+        snap1_id = str(uuid.uuid4())
+        snap2_id = str(uuid.uuid4())
+        now = datetime.utcnow().isoformat()
+
+        for snap_id in [snap1_id, snap2_id]:
+            conn.execute(
+                """INSERT INTO profile_snapshots
+                   (id, user_id, scores, quadrant_placement, interpretation, created_at)
+                   VALUES (?, ?, ?, ?, ?, ?)""",
+                (snap_id, user_id, "{}", "{}", "test", now),
+            )
+        conn.commit()
+        conn.close()
+
+        comparison = generate_comparison_snapshot(user_id, snap1_id)
+        assert "error" not in comparison
+        assert "flow_deltas" not in comparison
