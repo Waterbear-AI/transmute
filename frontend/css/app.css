@@ -1164,3 +1164,79 @@ body {
         max-width: none;
     }
 }
+
+@media (max-width: 480px) {
+    /* Stack layout fully */
+    .top-bar {
+        flex-wrap: wrap;
+        height: auto;
+        min-height: var(--top-bar-height);
+        padding: 8px 12px;
+        gap: 4px;
+    }
+
+    .top-bar__right {
+        font-size: 12px;
+    }
+
+    /* Tabs: horizontal scroll with visible scrollbar hint */
+    .results-tabs {
+        overflow-x: auto;
+        -webkit-overflow-scrolling: touch;
+        scrollbar-width: thin;
+        padding: 0 4px;
+    }
+
+    .results-tab {
+        padding: 8px 10px;
+        font-size: 11px;
+        min-width: max-content;
+    }
+
+    /* Chat adjustments */
+    .chat-messages {
+        padding: 8px;
+        gap: 8px;
+    }
+
+    .chat-input-area {
+        padding: 8px;
+    }
+
+    .chat-input {
+        font-size: 14px;
+    }
+
+    /* Results content tighter padding */
+    .results-content {
+        padding: 8px;
+    }
+
+    /* Session bar: wrap to multiple rows */
+    .bottom-bar {
+        height: auto;
+        min-height: var(--bottom-bar-height);
+        padding: 6px 8px;
+        overflow-x: visible;
+    }
+
+    .session-list {
+        flex-wrap: wrap;
+        gap: 4px;
+    }
+
+    .session-btn {
+        font-size: 11px;
+        padding: 3px 8px;
+    }
+
+    /* Auth container: full-width on small screens */
+    .auth-container {
+        width: 100%;
+        max-width: none;
+        padding: 16px;
+        margin: 0 8px;
+    }
+
+    /* Comparison grid already handled by existing 480px rule */
+}
