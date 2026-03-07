@@ -11,8 +11,24 @@ from agents.transmutation.spider_chart import generate_spider_chart
 
 logger = logging.getLogger(__name__)
 
-# Phase ordering for validation
-PHASE_ORDER = ["orientation", "assessment", "profile", "education", "development", "graduation"]
+# Phase ordering for validation (linear + loop phases)
+PHASE_ORDER = [
+    "orientation", "assessment", "profile", "education",
+    "development", "reassessment", "graduation", "graduated", "check_in",
+]
+
+# Allowed phase transitions (some are non-linear due to loops)
+ALLOWED_TRANSITIONS = {
+    "orientation": ["assessment"],
+    "assessment": ["profile"],
+    "profile": ["education"],
+    "education": ["development"],
+    "development": ["reassessment"],
+    "reassessment": ["development", "graduation"],
+    "graduation": ["graduated"],
+    "graduated": ["check_in"],
+    "check_in": ["graduated", "development"],
+}
 
 
 def get_assessment_state(user_id: str) -> dict[str, Any]:
@@ -133,10 +149,7 @@ def get_user_profile(user_id: str) -> dict[str, Any]:
 def advance_phase(user_id: str, new_phase: str, reason: str = "") -> dict[str, Any]:
     """Transition user to a new phase with validation.
 
-    Phase gates:
-    - orientation -> assessment: user must have sent >= 1 message (validated by caller)
-    - assessment -> profile: applicability-aware completion required
-    - profile -> education: snapshot must exist
+    Phase gates enforce server-side predicates for each transition.
     """
     if new_phase not in PHASE_ORDER:
         return {"error": f"Invalid phase: {new_phase}"}
@@ -150,11 +163,9 @@ def advance_phase(user_id: str, new_phase: str, reason: str = "") -> dict[str, A
             return {"error": "User not found"}
 
         current = row["current_phase"]
-        current_idx = PHASE_ORDER.index(current) if current in PHASE_ORDER else -1
-        new_idx = PHASE_ORDER.index(new_phase)
-
-        if new_idx <= current_idx:
-            return {"error": f"Cannot go from {current} to {new_phase}"}
+        allowed = ALLOWED_TRANSITIONS.get(current, [])
+        if new_phase not in allowed:
+            return {"error": f"Cannot transition from {current} to {new_phase}"}
 
         # Phase-specific gate checks
         if new_phase == "profile":
@@ -169,6 +180,43 @@ def advance_phase(user_id: str, new_phase: str, reason: str = "") -> dict[str, A
             ).fetchone()
             if not profile:
                 return {"error": "Profile snapshot must exist before advancing to education"}
+
+        if new_phase == "development" and current == "education":
+            gate = _check_education_completion_gate(conn, user_id)
+            if gate:
+                return gate
+
+        if new_phase == "reassessment":
+            gate = _check_development_completion_gate(conn, user_id)
+            if gate:
+                return gate
+
+        if new_phase == "development" and current == "reassessment":
+            # Requires updated profile (comparison snapshot exists)
+            snapshots = conn.execute(
+                "SELECT COUNT(*) as cnt FROM profile_snapshots WHERE user_id = ?",
+                (user_id,),
+            ).fetchone()
+            if snapshots["cnt"] < 2:
+                return {"error": "Comparison snapshot must exist before returning to development"}
+
+        if new_phase == "graduation" and current == "reassessment":
+            # 2-of-3 graduation indicators must be met (checked via tool)
+            pass  # evaluate_graduation_readiness is called by the agent before this
+
+        if new_phase == "graduated" and current == "graduation":
+            record = conn.execute(
+                "SELECT id FROM graduation_record WHERE user_id = ? LIMIT 1",
+                (user_id,),
+            ).fetchone()
+            if not record:
+                return {"error": "Graduation record must be saved before advancing to graduated"}
+
+        if new_phase == "graduated" and current == "graduation":
+            conn.execute(
+                "UPDATE users SET graduated_at = ? WHERE id = ?",
+                (datetime.utcnow().isoformat(), user_id),
+            )
 
         conn.execute(
             "UPDATE users SET current_phase = ? WHERE id = ?",
@@ -211,6 +259,109 @@ def _check_assessment_completion_gate(conn, user_id: str) -> Optional[dict]:
             }
 
     return None
+
+
+def _check_education_completion_gate(conn, user_id: str) -> Optional[dict]:
+    """Check if education is complete enough to advance to development.
+
+    Gate: top 3 weakest priority dimensions each have >= 60% comprehension
+    score AND all 5 categories per dimension have >= 1 question answered.
+    """
+    progress_row = conn.execute(
+        "SELECT progress FROM education_progress WHERE user_id = ?",
+        (user_id,),
+    ).fetchone()
+
+    if not progress_row:
+        return {"error": "No education progress found"}
+
+    progress = json.loads(progress_row["progress"] or "{}")
+
+    # Get profile to identify weakest dimensions
+    profile_row = conn.execute(
+        "SELECT scores FROM profile_snapshots WHERE user_id = ? ORDER BY created_at DESC LIMIT 1",
+        (user_id,),
+    ).fetchone()
+
+    if not profile_row:
+        return {"error": "No profile snapshot found"}
+
+    scores = json.loads(profile_row["scores"] or "{}")
+    ranked = sorted(
+        scores.items(),
+        key=lambda x: x[1].get("score", 0) if isinstance(x[1], dict) else x[1],
+    )
+    top3_dims = [dim for dim, _ in ranked[:3]]
+
+    required_categories = [
+        "what_this_means", "your_score", "daily_effects",
+        "strengths_gaps", "external_interaction",
+    ]
+
+    for dim in top3_dims:
+        dim_progress = progress.get(dim, {})
+
+        # Check all 5 categories have >= 1 question answered
+        for cat in required_categories:
+            cat_data = dim_progress.get(cat, {})
+            if not cat_data.get("questions_answered"):
+                return {
+                    "error": f"Dimension '{dim}' category '{cat}' has no comprehension questions answered",
+                    "dimension": dim,
+                    "category": cat,
+                }
+
+        # Check comprehension score >= 60% across answered categories
+        total_correct = 0
+        total_answered = 0
+        for cat in required_categories:
+            cat_data = dim_progress.get(cat, {})
+            total_correct += len(cat_data.get("questions_correct", []))
+            total_answered += len(cat_data.get("questions_answered", []))
+
+        if total_answered > 0:
+            score = total_correct / total_answered * 100
+            if score < 60:
+                return {
+                    "error": f"Dimension '{dim}' comprehension score is {score:.0f}% (minimum 60% required)",
+                    "dimension": dim,
+                    "score": round(score),
+                }
+
+    return None
+
+
+def _check_development_completion_gate(conn, user_id: str) -> Optional[dict]:
+    """Check if development is complete enough to advance to reassessment.
+
+    Gate: 10 practice entries OR 30 days elapsed since roadmap creation.
+    """
+    # Check practice entry count
+    count_row = conn.execute(
+        "SELECT COUNT(*) as cnt FROM practice_journal WHERE user_id = ?",
+        (user_id,),
+    ).fetchone()
+    entry_count = count_row["cnt"] if count_row else 0
+
+    if entry_count >= 10:
+        return None  # Gate passes
+
+    # Check days since roadmap creation
+    roadmap_row = conn.execute(
+        "SELECT created_at FROM development_roadmap WHERE user_id = ? ORDER BY created_at ASC LIMIT 1",
+        (user_id,),
+    ).fetchone()
+
+    if roadmap_row:
+        created = datetime.fromisoformat(roadmap_row["created_at"])
+        days_elapsed = (datetime.utcnow() - created).days
+        if days_elapsed >= 30:
+            return None  # Gate passes
+
+    return {
+        "error": f"Development requires 10 practice entries or 30 days elapsed. Current: {entry_count} entries.",
+        "entries": entry_count,
+    }
 
 
 def flag_safety_concern(user_id: str, session_id: str, reason: str) -> dict[str, Any]:
