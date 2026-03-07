@@ -38,6 +38,11 @@ class ModelSettings(BaseSettings):
         return os.environ.get(self.api_key_env)
 
 
+class TransmutationSettings(BaseSettings):
+    tau: float = 1.0
+    maslow_weights: list[int] = [5, 4, 3, 2, 1]
+
+
 class ModelCost(BaseSettings):
     input: float = 0.0
     output: float = 0.0
@@ -55,6 +60,7 @@ class Settings(BaseSettings):
 
     model: ModelSettings = ModelSettings()
     model_costs: dict[str, ModelCost] = {}
+    transmutation: TransmutationSettings = TransmutationSettings()
 
     @model_validator(mode="before")
     @classmethod
@@ -69,6 +75,9 @@ class Settings(BaseSettings):
                 k: ModelCost(**v) if isinstance(v, dict) else v
                 for k, v in yaml_config["model_costs"].items()
             }
+
+        if "transmutation" not in data and "transmutation" in yaml_config:
+            data["transmutation"] = yaml_config["transmutation"]
 
         return data
 

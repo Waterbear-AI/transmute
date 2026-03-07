@@ -9,3 +9,8 @@ model_costs:
   gpt-4o: { input: 2.50, output: 10.00 }
   gpt-4o-mini: { input: 0.15, output: 0.60 }
   "ollama/*": { input: 0.00, output: 0.00 }
+
+# Transmutation flow computation settings
+transmutation:
+  tau: 1.0                        # asymmetry coefficient (R5)
+  maslow_weights: [5, 4, 3, 2, 1] # weights for weighted total moral work (R4)

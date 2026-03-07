@@ -5,7 +5,7 @@ import bcrypt
 import pytest
 
 from api.auth import _sign_cookie, _verify_cookie
-from config import Settings, _load_yaml_config
+from config import Settings, TransmutationSettings, _load_yaml_config
 from db.database import run_migrations
 
 
@@ -116,3 +116,28 @@ class TestConfigLoading:
         cost = settings.get_cost_per_token("unknown-model")
         assert cost.input == 0.0
         assert cost.output == 0.0
+
+
+# --- Transmutation Settings Tests ---
+
+class TestTransmutationSettings:
+    def test_default_tau(self):
+        ts = TransmutationSettings()
+        assert ts.tau == 1.0
+
+    def test_default_maslow_weights(self):
+        ts = TransmutationSettings()
+        assert ts.maslow_weights == [5, 4, 3, 2, 1]
+
+    def test_settings_loads_transmutation_from_yaml(self):
+        settings = Settings()
+        assert settings.transmutation.tau == 1.0
+        assert settings.transmutation.maslow_weights == [5, 4, 3, 2, 1]
+
+    def test_custom_tau(self):
+        ts = TransmutationSettings(tau=2.5)
+        assert ts.tau == 2.5
+
+    def test_custom_maslow_weights(self):
+        ts = TransmutationSettings(maslow_weights=[1, 1, 1, 1, 1])
+        assert ts.maslow_weights == [1, 1, 1, 1, 1]
