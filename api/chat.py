@@ -15,15 +15,43 @@ from pydantic import BaseModel
 from api.auth import get_current_user_id
 from agents.transmutation.agent import create_transmutation_agent
 from agents.transmutation.session_service import SqliteSessionService
+from config import get_settings
+from google.adk.models import LLMRegistry
+from google.adk.models.lite_llm import LiteLlm
 from google.adk.runners import Runner
 
 logger = logging.getLogger(__name__)
 
 router = APIRouter(prefix="/api/chat", tags=["chat"])
 
+# Register LiteLlm so ADK can resolve non-Gemini models (Anthropic, Bedrock, OpenAI)
+LLMRegistry._register(".*", LiteLlm)
+
+# Build model string from config
+_settings = get_settings()
+_model_cfg = _settings.model
+
+
+def _resolve_model_string() -> str:
+    """Build a litellm-compatible model string from config."""
+    provider = _model_cfg.provider
+    model_id = _model_cfg.model_id
+    if provider == "bedrock":
+        return f"bedrock/{model_id}"
+    if provider == "anthropic":
+        return model_id
+    if provider == "openai":
+        return model_id
+    if provider == "ollama":
+        return f"ollama/{model_id}"
+    return model_id
+
+
 # Shared instances
 _session_service = SqliteSessionService()
-_agent = create_transmutation_agent()
+_model_string = _resolve_model_string()
+logger.info("Using model: %s (provider: %s)", _model_string, _model_cfg.provider)
+_agent = create_transmutation_agent(model=_model_string)
 _runner = Runner(
     agent=_agent,
     app_name="transmutation",

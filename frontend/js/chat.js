@@ -248,10 +248,13 @@ const Chat = (() => {
 
     function _finalizeAgentMessage(fullText) {
         _removeThinkingIndicator();
-        if (_currentMessageEl) {
-            // Replace with sanitized full text to handle any stream inconsistencies
-            Sanitize.setText(_currentMessageEl, fullText);
+        if (!_currentMessageEl) {
+            // No chunks were streamed — create the message element now
+            _currentMessageEl = document.createElement('div');
+            _currentMessageEl.className = 'chat-msg chat-msg--agent';
+            _messagesEl().appendChild(_currentMessageEl);
         }
+        Sanitize.setText(_currentMessageEl, fullText);
         _currentMessageEl = null;
         _scrollToBottom();
     }

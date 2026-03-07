@@ -65,7 +65,7 @@ const Sessions = (() => {
      */
     async function createNew() {
         try {
-            const res = await fetch('/sessions', {
+            const res = await fetch('/api/sessions', {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
                 body: JSON.stringify({})

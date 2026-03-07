@@ -42,12 +42,13 @@ const App = (() => {
 
         try {
             const [sessionsRes, resultsRes] = await Promise.all([
-                fetch('/sessions'),
+                fetch('/api/sessions'),
                 fetch('/api/results/' + encodeURIComponent(user.user_id))
             ]);
 
             if (sessionsRes.ok) {
-                const sessions = await sessionsRes.json();
+                const body = await sessionsRes.json();
+                const sessions = body.sessions || body;
                 Sessions.render(sessions);
                 if (sessions.length > 0) {
                     Sessions.activate(sessions[0].session_id);
