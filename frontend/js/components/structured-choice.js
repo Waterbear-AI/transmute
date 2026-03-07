@@ -28,6 +28,30 @@ const StructuredChoice = (() => {
             btn.className = 'structured-option';
             Sanitize.setText(btn, (opt.key ? opt.key + '. ' : '') + opt.text);
 
+            // Keyboard navigation: arrow keys between options
+            btn.addEventListener('keydown', (e) => {
+                const btns = Array.from(optionsEl.querySelectorAll('.structured-option:not(:disabled)'));
+                const idx = btns.indexOf(btn);
+                let target = null;
+
+                if (e.key === 'ArrowRight' || e.key === 'ArrowDown') {
+                    target = btns[(idx + 1) % btns.length];
+                } else if (e.key === 'ArrowLeft' || e.key === 'ArrowUp') {
+                    target = btns[(idx - 1 + btns.length) % btns.length];
+                } else if (e.key === 'Enter' || e.key === ' ') {
+                    e.preventDefault();
+                    btn.click();
+                    return;
+                }
+
+                if (target) {
+                    e.preventDefault();
+                    btns.forEach(b => b.setAttribute('tabindex', '-1'));
+                    target.setAttribute('tabindex', '0');
+                    target.focus();
+                }
+            });
+
             btn.addEventListener('click', () => {
                 if (btn.disabled) return;
 

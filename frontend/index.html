@@ -7,6 +7,8 @@
     <link rel="stylesheet" href="/css/app.css">
 </head>
 <body>
+    <a href="#chat-panel" class="skip-link">Skip to main content</a>
+
     <!-- Auth overlay (shown when not logged in) -->
     <div id="auth-overlay" class="auth-overlay">
         <div id="auth-container" class="auth-container"></div>
@@ -28,9 +30,10 @@
         <main class="main-panels">
             <!-- Left panel: Chat -->
             <section class="panel-chat" id="chat-panel">
-                <div class="chat-messages" id="chat-messages"></div>
+                <div class="chat-messages" id="chat-messages" aria-live="polite" aria-relevant="additions"></div>
                 <div class="chat-input-area">
                     <form id="chat-form" class="chat-form">
+                        <label for="chat-input" class="sr-only">Chat message</label>
                         <input type="text" id="chat-input" class="chat-input"
                                placeholder="Type a message..." autocomplete="off">
                         <button type="submit" class="chat-send-btn">Send</button>

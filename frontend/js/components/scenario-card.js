@@ -33,6 +33,30 @@ const ScenarioCard = (() => {
 
             btn.appendChild(Sanitize.textNode(choice.text));
 
+            // Keyboard navigation: arrow keys between choices
+            btn.addEventListener('keydown', (e) => {
+                const btns = Array.from(choicesEl.querySelectorAll('.scenario-choice:not(:disabled)'));
+                const idx = btns.indexOf(btn);
+                let target = null;
+
+                if (e.key === 'ArrowRight' || e.key === 'ArrowDown') {
+                    target = btns[(idx + 1) % btns.length];
+                } else if (e.key === 'ArrowLeft' || e.key === 'ArrowUp') {
+                    target = btns[(idx - 1 + btns.length) % btns.length];
+                } else if (e.key === 'Enter' || e.key === ' ') {
+                    e.preventDefault();
+                    btn.click();
+                    return;
+                }
+
+                if (target) {
+                    e.preventDefault();
+                    btns.forEach(b => b.setAttribute('tabindex', '-1'));
+                    target.setAttribute('tabindex', '0');
+                    target.focus();
+                }
+            });
+
             btn.addEventListener('click', async () => {
                 if (btn.disabled) return;
 
