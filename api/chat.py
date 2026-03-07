@@ -169,9 +169,10 @@ async def _stream_agent_response(
 
 
 def _estimate_cost(input_tokens: int, output_tokens: int) -> float:
-    """Rough cost estimate (Claude Sonnet pricing as default)."""
-    input_cost = (input_tokens / 1_000_000) * 3.0
-    output_cost = (output_tokens / 1_000_000) * 15.0
+    """Cost estimate using model-specific pricing from config.yaml."""
+    cost = _settings.get_cost_per_token(_model_cfg.model_id)
+    input_cost = (input_tokens / 1_000_000) * cost.input
+    output_cost = (output_tokens / 1_000_000) * cost.output
     return input_cost + output_cost
 
 
