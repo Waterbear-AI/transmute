@@ -273,6 +273,13 @@ const Results = (() => {
             img.style.marginTop = '12px';
             el.appendChild(img);
         }
+
+        // Quadrant chart
+        const chartContainer = document.createElement('div');
+        el.appendChild(chartContainer);
+        if (typeof QuadrantChart !== 'undefined') {
+            QuadrantChart.render(chartContainer, data.flow_data || null);
+        }
     }
 
     function _renderEducation(el) {

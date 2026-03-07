@@ -718,6 +718,44 @@ body {
     border: 0;
 }
 
+/* ── Quadrant Chart ────────────────────────── */
+
+.quadrant-chart-wrapper {
+    position: relative;
+    width: 100%;
+    min-width: 250px;
+    margin: 12px 0;
+}
+
+.quadrant-chart-canvas {
+    display: block;
+    width: 100%;
+    max-width: 100%;
+}
+
+.quadrant-chart-placeholder {
+    padding: 24px 16px;
+    text-align: center;
+    color: var(--color-text-muted);
+    font-size: 13px;
+    border: 1px dashed var(--color-border);
+    border-radius: 8px;
+    margin: 12px 0;
+}
+
+.quadrant-chart-tooltip {
+    position: absolute;
+    background: var(--color-surface);
+    border: 1px solid var(--color-border);
+    color: var(--color-text);
+    padding: 4px 8px;
+    border-radius: 4px;
+    font-size: 12px;
+    pointer-events: none;
+    white-space: nowrap;
+    z-index: 10;
+}
+
 /* ── Toast Notifications ───────────────────── */
 
 .toast-container {
