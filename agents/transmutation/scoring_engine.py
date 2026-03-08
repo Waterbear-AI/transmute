@@ -4,17 +4,60 @@ Converts raw assessment responses into dimension scores and archetype placement.
 All calculations are pure functions — no DB access, no side effects.
 """
 
+import logging
 from typing import Any, Optional
 
 from agents.transmutation.flow_engine import compute_full_profile
 from agents.transmutation.question_bank import get_question_bank
 from config import get_settings
 
-# Archetype thresholds on the 2-axis model.
-# X-axis: deprivation handling (negative = filters, positive = amplifies)
-# Y-axis: fulfillment handling (negative = absorbs, positive = emits)
+logger = logging.getLogger(__name__)
+
+# Archetype thresholds on the 2-axis model (v13 convention).
+# X-axis: Amplification A = fulfillment emission (positive = emits, negative = absorbs)
+# Y-axis: Filtering F = deprivation filtering (positive = filters, negative = amplifies)
 # Values are normalized to [-1, 1].
 CONDUIT_THRESHOLD = 0.15  # within this radius of center = Conduit
+
+
+def _enrich_scenario_responses(
+    scenario_responses: dict[str, Any],
+    qb,
+) -> dict[str, Any]:
+    """Backfill missing quadrant_weight and maslow_level in scenario responses.
+
+    Scenario responses created outside save_scenario_response (e.g., manual seeding,
+    direct API) may lack these fields. Looks up the scenario definition and chosen
+    option to populate them.
+    """
+    for scenario_id, response in scenario_responses.items():
+        needs_weight = "quadrant_weight" not in response
+        needs_maslow = "maslow_level" not in response
+
+        if not needs_weight and not needs_maslow:
+            continue
+
+        scenario = qb.get_scenario_by_id(scenario_id)
+        if not scenario:
+            continue
+
+        if needs_maslow:
+            response["maslow_level"] = scenario.get("maslow_level")
+
+        if needs_weight:
+            choice_key = response.get("choice")
+            for c in scenario.get("choices", []):
+                if c["key"] == choice_key:
+                    response["quadrant_weight"] = c.get("quadrant_weight", {})
+                    break
+
+        if needs_weight or needs_maslow:
+            logger.warning(
+                "Backfilled missing fields for scenario %s: quadrant_weight=%s, maslow_level=%s",
+                scenario_id, needs_weight, needs_maslow,
+            )
+
+    return scenario_responses
 
 
 def score_responses(
@@ -36,6 +79,10 @@ def score_responses(
         }
     """
     qb = get_question_bank()
+
+    # Enrich scenario responses that may be missing quadrant_weight/maslow_level
+    scenario_responses = _enrich_scenario_responses(scenario_responses, qb)
+
     dim_scores = _score_likert_by_dimension(responses, qb)
     quadrant = _calculate_quadrant(dim_scores, scenario_responses, qb)
 
@@ -143,13 +190,13 @@ def _calculate_quadrant(
 ) -> dict[str, Any]:
     """Calculate quadrant placement from transmutation scores and scenarios.
 
-    X-axis (deprivation handling):
-      Negative = filters deprivation (good), Positive = amplifies deprivation (bad)
-      Derived from: Deprivation Filtering (inverted), Amplification Awareness
+    Returns (x, y) in v13 convention:
+      X-axis = Amplification A (horizontal): positive = emits fulfillment, negative = absorbs
+      Y-axis = Filtering F (vertical): positive = filters deprivation, negative = amplifies
 
-    Y-axis (fulfillment handling):
-      Positive = emits fulfillment (good), Negative = absorbs fulfillment (bad)
-      Derived from: Fulfillment Emission, Absorption Patterns (inverted)
+    Quadrant layout (v13):
+      (+X, +Y) = Transmuter (top-right)   |  (-X, +Y) = Absorber (top-left)
+      (+X, -Y) = Magnifier (bottom-right) |  (-X, -Y) = Extractor (bottom-left)
 
     Scenario quadrant_weights contribute a weighted vote toward archetypes.
     """
@@ -173,17 +220,15 @@ def _calculate_quadrant(
     abs_score = sub_dims.get("Absorption Patterns", {}).get("score", 3.0)
 
     # Normalize to [-1, 1] range (3.0 = center)
-    # X-axis: high filtering = negative X (filters), low filtering + low amp awareness = positive X (amplifies)
-    # Filtering: high score → good at filtering → X goes negative (filter side)
-    # Amp awareness: high score → notices when amplifying → X goes negative (filter side)
-    x_filter = -(filt_score - 3.0) / 2.0  # high filtering pushes X negative
-    x_amp = -(amp_score - 3.0) / 2.0      # high amp awareness also pushes X negative
-    x_likert = (x_filter + x_amp) / 2.0
+    # Filtering sub-scores → Y-axis (F): high filtering = positive Y
+    filt_component = (filt_score - 3.0) / 2.0   # high filtering → +Y
+    amp_component = (amp_score - 3.0) / 2.0     # high amp awareness → +Y (notices and stops amplifying)
+    y_likert = (filt_component + amp_component) / 2.0
 
-    # Y-axis: high emission = positive Y (emits), high absorption = negative Y (absorbs)
-    y_emit = (emit_score - 3.0) / 2.0   # high emission pushes Y positive
-    y_abs = -(abs_score - 3.0) / 2.0    # high absorption pushes Y negative
-    y_likert = (y_emit + y_abs) / 2.0
+    # Emission sub-scores → X-axis (A): high emission = positive X
+    emit_component = (emit_score - 3.0) / 2.0   # high emission → +X
+    abs_component = -(abs_score - 3.0) / 2.0    # high absorption → -X
+    x_likert = (emit_component + abs_component) / 2.0
 
     # Incorporate scenario quadrant_weights
     archetype_votes = {
@@ -202,16 +247,17 @@ def _calculate_quadrant(
 
     total_scenario_votes = sum(archetype_votes.values())
 
-    # Map scenario votes to X, Y nudges
-    # Transmuter: -X, +Y; Absorber: -X, -Y; Magnifier: +X, +Y; Extractor: +X, -Y; Conduit: 0, 0
+    # Map scenario votes to X, Y nudges (v13 convention)
+    # X = A: Transmuter +X, Magnifier +X (both emit fulfillment); Absorber -X, Extractor -X
+    # Y = F: Transmuter +Y, Absorber +Y (both filter deprivation); Magnifier -Y, Extractor -Y
     if total_scenario_votes > 0:
         scenario_x = (
-            archetype_votes["magnifier"] + archetype_votes["extractor"]
-            - archetype_votes["transmuter"] - archetype_votes["absorber"]
-        ) / total_scenario_votes
-        scenario_y = (
             archetype_votes["transmuter"] + archetype_votes["magnifier"]
             - archetype_votes["absorber"] - archetype_votes["extractor"]
+        ) / total_scenario_votes
+        scenario_y = (
+            archetype_votes["transmuter"] + archetype_votes["absorber"]
+            - archetype_votes["magnifier"] - archetype_votes["extractor"]
         ) / total_scenario_votes
     else:
         scenario_x = 0.0
@@ -242,9 +288,9 @@ def _calculate_quadrant(
 def _map_archetype(x: float, y: float) -> str:
     """Map (x, y) coordinates to one of the 5 archetypes.
 
-    Quadrant layout:
-        (-X, +Y) = Transmuter  |  (+X, +Y) = Magnifier
-        (-X, -Y) = Absorber    |  (+X, -Y) = Extractor
+    v13 convention (X = Amplification, Y = Filtering):
+        (+X, +Y) = Transmuter (top-right)    |  (-X, +Y) = Absorber (top-left)
+        (+X, -Y) = Magnifier (bottom-right)  |  (-X, -Y) = Extractor (bottom-left)
         (center)  = Conduit
     """
     # Check for Conduit (near center)
@@ -252,11 +298,11 @@ def _map_archetype(x: float, y: float) -> str:
         return "conduit"
 
     # Determine quadrant
-    if x <= 0 and y >= 0:
+    if x >= 0 and y >= 0:
         return "transmuter"
-    elif x > 0 and y >= 0:
+    elif x >= 0 and y < 0:
         return "magnifier"
-    elif x <= 0 and y < 0:
+    elif x < 0 and y >= 0:
         return "absorber"
     else:
         return "extractor"
