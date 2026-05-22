@@ -204,6 +204,108 @@ class TestMigrationRunner:
             os.unlink(db_path)
 
 
+# --- User ID Injection Tests (BE-006) ---
+
+class TestWithUserId:
+    """Unit tests for the with_user_id helper."""
+
+    def _make_ctx(self, user_id: str):
+        """Create a minimal mock ReadonlyContext with state."""
+        class FakeCtx:
+            def __init__(self, state):
+                self.state = state
+        return FakeCtx({"user_id": user_id})
+
+    def test_injects_user_id_into_prompt(self):
+        from agents.transmutation.sub_agents.inject_user_id import with_user_id
+        fn = with_user_id("Do the thing.")
+        ctx = self._make_ctx("user-abc-123")
+        result = fn(ctx)
+        assert "user-abc-123" in result
+        assert "Do the thing." in result
+
+    def test_user_id_appears_before_prompt(self):
+        from agents.transmutation.sub_agents.inject_user_id import with_user_id
+        fn = with_user_id("Static prompt text.")
+        ctx = self._make_ctx("user-xyz")
+        result = fn(ctx)
+        user_id_pos = result.find("user-xyz")
+        prompt_pos = result.find("Static prompt text.")
+        assert user_id_pos < prompt_pos, "user_id header must precede static prompt"
+
+    def test_missing_user_id_falls_back_to_unknown(self):
+        from agents.transmutation.sub_agents.inject_user_id import with_user_id
+        fn = with_user_id("Any prompt.")
+
+        class FakeCtx:
+            state = {}  # no user_id key
+
+        result = fn(FakeCtx())
+        assert "unknown" in result
+
+    def test_all_sub_agents_use_with_user_id(self):
+        """Every sub-agent create_* function must use with_user_id for its instruction."""
+        import inspect
+        from agents.transmutation.sub_agents import (
+            assessment, check_in, development, education,
+            graduation, profile, reassessment,
+        )
+        modules = [assessment, check_in, development, education, graduation, profile, reassessment]
+        for mod in modules:
+            src = inspect.getsource(mod)
+            assert "with_user_id" in src, (
+                f"Sub-agent module {mod.__name__} does not use with_user_id"
+            )
+
+    def test_root_agent_reads_user_id_from_context(self):
+        """Root agent _root_instruction must embed user_id from ctx.state."""
+        from agents.transmutation.agent import _root_instruction
+
+        class FakeCtx:
+            state = {"user_id": "root-user-test-id"}
+
+        result = _root_instruction(FakeCtx())
+        assert "root-user-test-id" in result
+
+    def test_create_session_seeds_user_id_in_state(self):
+        """POST /api/sessions creates a session with user_id in the ADK state."""
+        import sqlite3
+        import json
+
+        resp = None
+        try:
+            from fastapi.testclient import TestClient
+            from main import app
+            tc = TestClient(app)
+            reg = tc.post("/auth/register", json={
+                "name": "Inject Test",
+                "email": "injecttest@example.com",
+                "password": "password123",
+            })
+            assert reg.status_code == 200
+            user_id = reg.json()["user_id"]
+            cookies = reg.cookies
+
+            sess = tc.post("/api/sessions", cookies=cookies)
+            assert sess.status_code == 200
+            session_id = sess.json()["session_id"]
+
+            conn = sqlite3.connect(__import__("os").environ["DB_PATH"])
+            row = conn.execute(
+                "SELECT session_state FROM adk_sessions WHERE session_id = ?",
+                (session_id,),
+            ).fetchone()
+            conn.close()
+
+            assert row is not None
+            state = json.loads(row[0])
+            assert state.get("user_id") == user_id, (
+                "Session state must contain the authenticated user_id"
+            )
+        except Exception:
+            raise
+
+
 # --- Chat Debug Instrumentation Tests ---
 
 class TestChatDebugInstrumentation:
