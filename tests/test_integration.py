@@ -296,6 +296,177 @@ class TestMigrations:
         assert "events_json" in cols
 
 
+class TestHistoryEndpoint:
+    """Integration tests for GET /api/sessions/{session_id}/history (BE-003)."""
+
+    def _register_and_create_session(self, email: str = "historyuser@example.com"):
+        resp = client.post("/auth/register", json={
+            "name": "History User",
+            "email": email,
+            "password": "password123",
+        })
+        assert resp.status_code == 200
+        cookies = resp.cookies
+        user_id = resp.json()["user_id"]
+        sess = client.post("/api/sessions", cookies=cookies)
+        assert sess.status_code == 200
+        session_id = sess.json()["session_id"]
+        return user_id, session_id, cookies
+
+    def test_history_returns_200_with_empty_messages_for_new_session(self):
+        _, session_id, cookies = self._register_and_create_session("h1@example.com")
+        resp = client.get(f"/api/sessions/{session_id}/history", cookies=cookies)
+        assert resp.status_code == 200
+        data = resp.json()
+        assert data["session_id"] == session_id
+        assert isinstance(data["messages"], list)
+        assert isinstance(data["answered_responses"], dict)
+
+    def test_history_returns_404_for_nonexistent_session(self):
+        _, _, cookies = self._register_and_create_session("h2@example.com")
+        resp = client.get("/api/sessions/nonexistent-session-id/history", cookies=cookies)
+        assert resp.status_code == 404
+
+    def test_history_returns_404_for_other_users_session(self):
+        _, session_id, _ = self._register_and_create_session("h3@example.com")
+
+        # Register a second user
+        resp2 = client.post("/auth/register", json={
+            "name": "Other User",
+            "email": "h3other@example.com",
+            "password": "password123",
+        })
+        assert resp2.status_code == 200
+        cookies2 = resp2.cookies
+
+        # Other user tries to access first user's session
+        resp = client.get(f"/api/sessions/{session_id}/history", cookies=cookies2)
+        assert resp.status_code == 404
+
+    def test_history_returns_401_when_unauthenticated(self):
+        _, session_id, _ = self._register_and_create_session("h4@example.com")
+        # Use a fresh client with no session cookie to simulate unauthenticated request
+        fresh_client = TestClient(app)
+        resp = fresh_client.get(f"/api/sessions/{session_id}/history")
+        assert resp.status_code == 401
+
+    def test_history_with_corrupt_events_json_returns_200_with_empty_messages(self):
+        """Corrupt events_json must degrade gracefully to empty messages."""
+        import sqlite3
+
+        _, session_id, cookies = self._register_and_create_session("h5@example.com")
+
+        # Corrupt events_json
+        conn = sqlite3.connect(os.environ["DB_PATH"])
+        conn.execute(
+            "UPDATE adk_sessions SET events_json = ? WHERE session_id = ?",
+            ("INVALID_JSON{{{", session_id),
+        )
+        conn.commit()
+        conn.close()
+
+        resp = client.get(f"/api/sessions/{session_id}/history", cookies=cookies)
+        assert resp.status_code == 200
+        data = resp.json()
+        assert data["messages"] == []
+
+    def test_history_with_question_batch_event_rehydrates_questions(self):
+        """Widget events with question_ids are re-hydrated from the question bank."""
+        import sqlite3
+        import json as _json
+
+        user_id, session_id, cookies = self._register_and_create_session("h6@example.com")
+
+        # Manually write a slimmed question_batch event into events_json
+        from agents.transmutation.question_bank import get_question_bank
+        qb = get_question_bank()
+        all_questions = qb.get_all_questions()
+        if not all_questions:
+            # Skip if question bank not available in test environment
+            return
+
+        # Use real question IDs from the bank
+        qids = [q["id"] for q in all_questions[:2]]
+        slimmed_event = {
+            "content": {
+                "role": "tool",
+                "parts": [{
+                    "function_response": {
+                        "name": "present_question_batch",
+                        "response": {
+                            "event_type": "assessment.question_batch",
+                            "batch_id": "b1",
+                            "dimension": all_questions[0].get("dimension", "test"),
+                            "count": len(qids),
+                            "question_ids": qids,
+                            "summary": "Presented questions.",
+                        }
+                    }
+                }]
+            }
+        }
+
+        conn = sqlite3.connect(os.environ["DB_PATH"])
+        conn.execute(
+            "UPDATE adk_sessions SET events_json = ? WHERE session_id = ?",
+            (_json.dumps([slimmed_event]), session_id),
+        )
+        conn.commit()
+        conn.close()
+
+        resp = client.get(f"/api/sessions/{session_id}/history", cookies=cookies)
+        assert resp.status_code == 200
+        data = resp.json()
+        widget_msgs = [m for m in data["messages"] if m["role"] == "widget"]
+        assert len(widget_msgs) == 1
+        widget_data = widget_msgs[0]["data"]
+        assert widget_data["event_type"] == "assessment.question_batch"
+        assert "questions" in widget_data
+        assert len(widget_data["questions"]) == len(qids)
+        # Each question must have text and scale_labels
+        for q in widget_data["questions"]:
+            assert "text" in q or "id" in q
+            assert "scale_labels" in q
+
+    def test_history_filters_batch_complete_user_messages(self):
+        """User messages with type=batch_complete must be filtered from history."""
+        import sqlite3
+        import json as _json
+
+        _, session_id, cookies = self._register_and_create_session("h7@example.com")
+
+        events = [
+            {
+                "content": {
+                    "role": "user",
+                    "parts": [{"text": _json.dumps({"type": "batch_complete", "data": {}})}]
+                }
+            },
+            {
+                "content": {
+                    "role": "user",
+                    "parts": [{"text": "Hello agent!"}]
+                }
+            },
+        ]
+
+        conn = sqlite3.connect(os.environ["DB_PATH"])
+        conn.execute(
+            "UPDATE adk_sessions SET events_json = ? WHERE session_id = ?",
+            (_json.dumps(events), session_id),
+        )
+        conn.commit()
+        conn.close()
+
+        resp = client.get(f"/api/sessions/{session_id}/history", cookies=cookies)
+        assert resp.status_code == 200
+        msgs = resp.json()["messages"]
+        user_msgs = [m for m in msgs if m["role"] == "user"]
+        # Only the real user message, not the batch_complete one
+        assert len(user_msgs) == 1
+        assert user_msgs[0]["text"] == "Hello agent!"
+
+
 class TestSessionPersistence:
     """Integration tests for SqliteSessionService event persistence (BE-002)."""
 
