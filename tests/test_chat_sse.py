@@ -83,8 +83,9 @@ class TestAssessmentAPI:
         data = resp.json()
         assert "questions" in data
         assert "scenarios" in data
-        assert len(data["questions"]) == 40
-        assert len(data["scenarios"]) == 5
+        # Question bank holds the full assessment: 200 Likert questions + 20 scenarios
+        assert len(data["questions"]) == 200
+        assert len(data["scenarios"]) == 20
 
     def test_get_state_empty(self, authenticated_client):
         resp = authenticated_client.get("/api/assessment/state")
