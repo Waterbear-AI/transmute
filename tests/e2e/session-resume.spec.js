@@ -60,6 +60,11 @@ async function bypassAuthWithSession(page, sessionId = 'test-session-id') {
 test.describe('Session Resume (FE-001)', () => {
 
   test.beforeEach(async ({ page }) => {
+    // Track JavaScript errors — uncaught exceptions must be 0
+    const jsErrors = [];
+    page.on('pageerror', err => jsErrors.push(err.message));
+    page._jsErrors = jsErrors;
+
     await bypassAuthWithSession(page);
   });
 
@@ -82,6 +87,9 @@ test.describe('Session Resume (FE-001)', () => {
     await expect(firstBtn).toBeVisible();
     const text = await firstBtn.textContent();
     expect(text).toContain('msgs');
+
+    // Verify 0 uncaught JavaScript errors
+    expect(page._jsErrors, `JS errors: ${page._jsErrors.join(', ')}`).toHaveLength(0);
   });
 
   test('session bar includes semantic New and Start Over buttons', async ({ page }) => {
@@ -249,11 +257,25 @@ test.describe('Session Resume (FE-001)', () => {
     }
   });
 
+  test('page load produces 0 uncaught JavaScript errors', async ({ page }) => {
+    await page.goto('/');
+    await page.locator('#app').waitFor({ state: 'visible', timeout: 10000 });
+    await page.waitForLoadState('networkidle');
+
+    // Verify no uncaught JS errors occurred during page load and session rendering
+    expect(page._jsErrors, `Unexpected JS errors: ${page._jsErrors.join('; ')}`).toHaveLength(0);
+  });
+
 });
 
 test.describe('Session Reset (FE-001)', () => {
 
   test.beforeEach(async ({ page }) => {
+    // Track JavaScript errors — uncaught exceptions must be 0
+    const jsErrors = [];
+    page.on('pageerror', err => jsErrors.push(err.message));
+    page._jsErrors = jsErrors;
+
     await bypassAuthWithSession(page);
   });
 
