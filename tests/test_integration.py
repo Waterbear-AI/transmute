@@ -294,3 +294,191 @@ class TestMigrations:
         ]
         assert tables == expected
         assert "events_json" in cols
+
+
+class TestSessionPersistence:
+    """Integration tests for SqliteSessionService event persistence (BE-002)."""
+
+    def _create_user_and_session(self):
+        """Register a user, return (user_id, session_id)."""
+        resp = client.post("/auth/register", json={
+            "name": "Session User",
+            "email": "sessionuser@example.com",
+            "password": "password123",
+        })
+        assert resp.status_code == 200
+        user_id = resp.json()["user_id"]
+        cookies = resp.cookies
+
+        sess_resp = client.post("/api/sessions", cookies=cookies)
+        assert sess_resp.status_code == 200
+        session_id = sess_resp.json()["session_id"]
+        return user_id, session_id, cookies
+
+    def test_append_event_persists_slimmed_events_json(self):
+        """After append_event, events_json column contains slimmed event data."""
+        import asyncio
+        import sqlite3
+
+        user_id, session_id, cookies = self._create_user_and_session()
+
+        from agents.transmutation.session_service import SqliteSessionService
+        from google.adk.events.event import Event
+        from google.genai import types as genai_types
+
+        svc = SqliteSessionService()
+
+        async def run():
+            session = await svc.get_session(
+                app_name="transmutation",
+                user_id=user_id,
+                session_id=session_id,
+            )
+            assert session is not None
+
+            # Build a question_batch tool response event
+            event_data = {
+                "event_type": "assessment.question_batch",
+                "batch_id": "b1",
+                "count": 2,
+                "question_ids": ["q-a", "q-b"],
+                "questions": [
+                    {"id": "q-a", "text": "Full question text that should be stripped"},
+                    {"id": "q-b", "text": "Another full question text"},
+                ],
+            }
+            content = genai_types.Content(
+                role="tool",
+                parts=[
+                    genai_types.Part(
+                        function_response=genai_types.FunctionResponse(
+                            name="get_next_question_batch",
+                            response=event_data,
+                        )
+                    )
+                ],
+            )
+            evt = Event(author="tool", content=content)
+            await svc.append_event(session, evt)
+
+        asyncio.run(run())
+
+        # Inspect raw DB — events_json must exist and be slimmed
+        conn = sqlite3.connect(os.environ["DB_PATH"])
+        row = conn.execute(
+            "SELECT events_json FROM adk_sessions WHERE session_id = ?",
+            (session_id,),
+        ).fetchone()
+        conn.close()
+
+        import json as _json
+        assert row is not None
+        assert row[0] is not None
+        events = _json.loads(row[0])
+        assert len(events) >= 1
+        # Find the tool response part
+        fr = events[-1]["content"]["parts"][0]["function_response"]
+        assert "question_ids" in fr["response"]
+        assert fr["response"]["question_ids"] == ["q-a", "q-b"]
+        assert "questions" not in fr["response"], "Full questions must be stripped"
+
+    def test_get_session_restores_events_from_events_json(self):
+        """Reloading a session after append_event restores slimmed events."""
+        import asyncio
+
+        user_id, session_id, cookies = self._create_user_and_session()
+
+        from agents.transmutation.session_service import SqliteSessionService
+        from google.adk.events.event import Event
+        from google.genai import types as genai_types
+
+        svc = SqliteSessionService()
+
+        async def run():
+            session = await svc.get_session(
+                app_name="transmutation",
+                user_id=user_id,
+                session_id=session_id,
+            )
+            content = genai_types.Content(
+                role="model",
+                parts=[genai_types.Part(text="Hello from the agent")],
+            )
+            evt = Event(author="agent", content=content)
+            await svc.append_event(session, evt)
+
+            # Re-load session
+            session2 = await svc.get_session(
+                app_name="transmutation",
+                user_id=user_id,
+                session_id=session_id,
+            )
+            assert session2 is not None
+            assert len(session2.events) >= 1
+
+        asyncio.run(run())
+
+    def test_get_session_with_null_events_json_returns_empty_events(self):
+        """A session row with NULL events_json loads with events == []."""
+        import sqlite3
+
+        user_id, session_id, cookies = self._create_user_and_session()
+
+        # Manually set events_json to NULL
+        conn = sqlite3.connect(os.environ["DB_PATH"])
+        conn.execute(
+            "UPDATE adk_sessions SET events_json = NULL WHERE session_id = ?",
+            (session_id,),
+        )
+        conn.commit()
+        conn.close()
+
+        from agents.transmutation.session_service import SqliteSessionService
+        import asyncio
+
+        svc = SqliteSessionService()
+
+        async def run():
+            session = await svc.get_session(
+                app_name="transmutation",
+                user_id=user_id,
+                session_id=session_id,
+            )
+            assert session is not None
+            assert session.events == []
+
+        asyncio.run(run())
+
+    def test_get_session_with_invalid_events_json_logs_warning_and_returns_empty(self, caplog):
+        """A session with invalid events_json falls back to [] and logs a warning."""
+        import sqlite3
+        import logging
+
+        user_id, session_id, cookies = self._create_user_and_session()
+
+        # Corrupt events_json
+        conn = sqlite3.connect(os.environ["DB_PATH"])
+        conn.execute(
+            "UPDATE adk_sessions SET events_json = ? WHERE session_id = ?",
+            ("NOT_VALID_JSON{{{", session_id),
+        )
+        conn.commit()
+        conn.close()
+
+        from agents.transmutation.session_service import SqliteSessionService
+        import asyncio
+
+        svc = SqliteSessionService()
+
+        async def run():
+            with caplog.at_level(logging.WARNING, logger="agents.transmutation.session_service"):
+                session = await svc.get_session(
+                    app_name="transmutation",
+                    user_id=user_id,
+                    session_id=session_id,
+                )
+            assert session is not None
+            assert session.events == []
+
+        asyncio.run(run())
+        assert any("Failed to restore events" in r.message for r in caplog.records)

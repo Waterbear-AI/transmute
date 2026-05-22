@@ -243,6 +243,139 @@ class TestChatDebugInstrumentation:
 
 # --- Config Loading Tests ---
 
+# --- Session Event Slimming Tests ---
+
+class TestSlimToolResponse:
+    """Unit tests for _slim_tool_response — pure function."""
+
+    def setup_method(self):
+        from agents.transmutation.session_service import _slim_tool_response
+        self._slim = _slim_tool_response
+
+    def test_question_batch_retains_question_ids(self):
+        response = {
+            "event_type": "assessment.question_batch",
+            "batch_id": "b1",
+            "dimension": "consciousness",
+            "sub_dimension": "awareness",
+            "count": 3,
+            "question_ids": ["q1", "q2", "q3"],
+            "questions": [{"id": "q1", "text": "Long question text..."}],  # stripped
+        }
+        slimmed = self._slim("get_next_question_batch", response)
+        assert slimmed["question_ids"] == ["q1", "q2", "q3"]
+        assert "questions" not in slimmed
+        assert slimmed["event_type"] == "assessment.question_batch"
+        assert slimmed["count"] == 3
+
+    def test_question_batch_missing_question_ids_defaults_to_empty_list(self):
+        response = {
+            "event_type": "assessment.question_batch",
+            "batch_id": "b1",
+            "count": 2,
+        }
+        slimmed = self._slim("get_next_question_batch", response)
+        assert slimmed["question_ids"] == []
+
+    def test_profile_snapshot_strips_spider_png_keeps_quadrant(self):
+        response = {
+            "event_type": "profile.snapshot",
+            "saved": True,
+            "snapshot_id": "snap-1",
+            "quadrant": "Creator",
+            "spider_chart": "base64encodedPNGdata==",  # stripped
+            "scores": {"consciousness": 0.8},  # stripped
+        }
+        slimmed = self._slim("generate_profile_snapshot", response)
+        assert "spider_chart" not in slimmed
+        assert "scores" not in slimmed
+        assert slimmed["quadrant"] == "Creator"
+        assert slimmed["event_type"] == "profile.snapshot"
+
+    def test_scenario_retains_scenario_id(self):
+        response = {
+            "event_type": "assessment.scenario",
+            "scenario_id": "sc-42",
+            "narrative": "A very long scenario text...",
+            "choices": [{"id": "c1", "text": "Choice 1"}, {"id": "c2", "text": "Choice 2"}],
+        }
+        slimmed = self._slim("get_scenario", response)
+        assert slimmed["scenario_id"] == "sc-42"
+        assert slimmed["event_type"] == "assessment.scenario"
+        # Narrative and full choices are stripped
+        assert "narrative" not in slimmed
+        assert "choices" not in slimmed
+
+    def test_small_response_passes_through(self):
+        response = {"status": "ok", "count": 5}
+        slimmed = self._slim("some_tool", response)
+        assert slimmed == response
+
+    def test_large_unknown_response_truncated_to_scalars(self):
+        response = {
+            "key1": "value1",
+            "big_list": list(range(500)),  # large non-scalar
+            "simple": 42,
+        }
+        slimmed = self._slim("some_tool", response)
+        # big_list is non-scalar so should be dropped
+        assert "big_list" not in slimmed
+        assert slimmed.get("simple") == 42
+
+
+class TestSlimEventsForStorage:
+    """Unit tests for _slim_events_for_storage — pure function."""
+
+    def setup_method(self):
+        from agents.transmutation.session_service import _slim_events_for_storage
+        self._slim = _slim_events_for_storage
+
+    def _make_tool_response_event(self, tool_name: str, response: dict) -> dict:
+        return {
+            "content": {
+                "role": "tool",
+                "parts": [
+                    {
+                        "function_response": {
+                            "name": tool_name,
+                            "response": response,
+                        }
+                    }
+                ],
+            }
+        }
+
+    def test_empty_events_returns_empty(self):
+        assert self._slim([]) == []
+
+    def test_non_tool_event_passes_through(self):
+        event = {"content": {"role": "model", "parts": [{"text": "Hello"}]}}
+        result = self._slim([event])
+        assert result == [event]
+
+    def test_question_batch_event_slimmed_with_question_ids(self):
+        event = self._make_tool_response_event("get_next_question_batch", {
+            "event_type": "assessment.question_batch",
+            "batch_id": "b1",
+            "count": 3,
+            "question_ids": ["q1", "q2", "q3"],
+            "questions": [{"id": "q1", "text": "Text..."}],
+        })
+        result = self._slim([event])
+        assert len(result) == 1
+        fr = result[0]["content"]["parts"][0]["function_response"]
+        assert fr["response"]["question_ids"] == ["q1", "q2", "q3"]
+        assert "questions" not in fr["response"]
+
+    def test_event_without_parts_passes_through(self):
+        event = {"content": {"role": "tool", "parts": []}}
+        result = self._slim([event])
+        assert result == [event]
+
+
+# --- Config Loading Tests ---
+
+
 class TestConfigLoading:
     def test_yaml_config_loads(self):
         config = _load_yaml_config()

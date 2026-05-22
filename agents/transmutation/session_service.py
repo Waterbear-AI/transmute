@@ -17,6 +17,107 @@ from db.database import get_db_session
 logger = logging.getLogger(__name__)
 
 
+def _slim_events_for_storage(events: list[dict]) -> list[dict]:
+    """Reduce token footprint of stored events.
+
+    Large tool responses (question batches, assessment state, profile data)
+    bloat the session history. Since these are already persisted in the DB
+    and rendered to the frontend via SSE, we replace them with compact
+    summaries in the conversation history the LLM sees on subsequent turns.
+    """
+    slimmed = []
+    for event in events:
+        content = event.get("content", {})
+        parts = content.get("parts", [])
+        if not parts:
+            slimmed.append(event)
+            continue
+
+        new_parts = []
+        changed = False
+        for part in parts:
+            fr = part.get("function_response")
+            if fr and isinstance(fr.get("response"), dict):
+                response = fr["response"]
+                slim = _slim_tool_response(fr.get("name", ""), response)
+                if slim is not response:
+                    part = {**part, "function_response": {**fr, "response": slim}}
+                    changed = True
+            new_parts.append(part)
+
+        if changed:
+            event = {**event, "content": {**content, "parts": new_parts}}
+        slimmed.append(event)
+
+    return slimmed
+
+
+def _slim_tool_response(tool_name: str, response: dict) -> dict:
+    """Replace verbose tool responses with agent-friendly summaries."""
+    event_type = response.get("event_type", "")
+
+    # Question batches: strip full question objects, keep metadata + question_ids
+    # question_ids MUST be retained so /history can re-hydrate LikertCard widgets.
+    if event_type == "assessment.question_batch":
+        return {
+            "event_type": event_type,
+            "batch_id": response.get("batch_id", ""),
+            "dimension": response.get("dimension", ""),
+            "sub_dimension": response.get("sub_dimension", ""),
+            "count": response.get("count", 0),
+            "question_ids": response.get("question_ids", []),
+            "summary": f"Presented {response.get('count', 0)} questions to user. Waiting for responses.",
+        }
+
+    # Profile snapshot: strip spider chart binary and large score objects
+    if event_type == "profile.snapshot":
+        return {
+            "event_type": event_type,
+            "saved": response.get("saved"),
+            "snapshot_id": response.get("snapshot_id"),
+            "quadrant": response.get("quadrant"),
+            "summary": "Profile snapshot saved with scores, quadrant placement, and spider chart.",
+        }
+
+    # Assessment state: already slimmed in tool, but guard against old events
+    if tool_name == "get_assessment_state" and "responses" in response:
+        progress = response.get("progress", {})
+        return {
+            "exists": response.get("exists"),
+            "current_phase": response.get("current_phase"),
+            "progress": progress,
+        }
+
+    # Profile generation: strip large score details
+    if tool_name == "generate_profile_snapshot" and "scores" in response:
+        return {
+            "scores_summary": {dim: round(v.get("score", v.get("weighted_avg", 0)), 2)
+                               if isinstance(v, dict) else round(v, 2)
+                               for dim, v in response.get("scores", {}).items()},
+            "quadrant": response.get("quadrant"),
+            "has_spider_chart": response.get("has_spider_chart"),
+            "insufficient_dimensions": response.get("insufficient_dimensions"),
+        }
+
+    # Scenario: strip after presentation
+    if event_type == "assessment.scenario":
+        return {
+            "event_type": event_type,
+            "scenario_id": response.get("scenario_id"),
+            "summary": "Scenario presented to user.",
+        }
+
+    # Default: pass through if small enough, otherwise truncate
+    response_str = json.dumps(response)
+    if len(response_str) > 2000:
+        logger.debug("Truncating large tool response from %s (%d chars)", tool_name, len(response_str))
+        # Keep only top-level keys with scalar values
+        return {k: v for k, v in response.items()
+                if isinstance(v, (str, int, float, bool, type(None))) and len(str(v)) < 200}
+
+    return response
+
+
 class SqliteSessionService(BaseSessionService):
     """ADK session service backed by SQLite adk_sessions table.
 
@@ -83,12 +184,24 @@ class SqliteSessionService(BaseSessionService):
         if isinstance(state, str):
             state = json.loads(state) if state else {}
 
-        return Session(
+        # Restore conversation history
+        events = []
+        events_json = row["events_json"] if "events_json" in row.keys() else None
+        if events_json:
+            try:
+                events_data = json.loads(events_json) if isinstance(events_json, str) else events_json
+                events = [Event.model_validate(e) for e in events_data]
+            except Exception as e:
+                logger.warning("Failed to restore events for session %s: %s", session_id, e)
+
+        session = Session(
             id=row["session_id"],
             app_name=row["app_name"] or app_name,
             user_id=row["user_id"],
             state=state or {},
+            events=events,
         )
+        return session
 
     async def list_sessions(
         self, *, app_name: str, user_id: str
@@ -132,14 +245,17 @@ class SqliteSessionService(BaseSessionService):
         event = await super().append_event(session=session, event=event)
         session.last_update_time = event.timestamp
 
-        # Persist updated state to SQLite
+        # Persist updated state and slimmed events to SQLite
+        events_data = [e.model_dump(mode="json", exclude_none=True) for e in session.events]
+        slimmed = _slim_events_for_storage(events_data)
         with get_db_session() as conn:
             conn.execute(
                 """UPDATE adk_sessions
-                   SET session_state = ?, updated_at = ?
+                   SET session_state = ?, events_json = ?, updated_at = ?
                    WHERE session_id = ?""",
                 (
                     json.dumps(session.state),
+                    json.dumps(slimmed),
                     datetime.utcnow().isoformat(),
                     session.id,
                 ),
