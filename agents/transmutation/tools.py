@@ -295,18 +295,34 @@ def _check_education_completion_gate(conn, user_id: str) -> Optional[dict]:
         "strengths_gaps", "external_interaction",
     ]
 
+    qb = get_question_bank()
     for dim in top3_dims:
         dim_progress = progress.get(dim, {})
 
-        # Check all 5 categories have >= 1 question answered
+        # Check all 5 categories have >= 1 question answered.
+        # A category with NO authored comprehension content in the question bank
+        # is waived (and logged) rather than blocking forever — a learner cannot
+        # answer questions that do not exist. Categories that DO have content
+        # remain strictly required. After full content authoring this waiver is
+        # unreachable; it exists solely to prevent a future content gap from
+        # re-introducing a permanent education -> development dead-end.
         for cat in required_categories:
             cat_data = dim_progress.get(cat, {})
-            if not cat_data.get("questions_answered"):
-                return {
-                    "error": f"Dimension '{dim}' category '{cat}' has no comprehension questions answered",
-                    "dimension": dim,
-                    "category": cat,
-                }
+            if cat_data.get("questions_answered"):
+                continue
+            if not qb.get_comprehension_questions_for_category(dim, cat):
+                logger.warning(
+                    "Education gate: no comprehension content for %s / %s; "
+                    "waiving this category so a content gap cannot permanently "
+                    "block advancement.",
+                    dim, cat,
+                )
+                continue
+            return {
+                "error": f"Dimension '{dim}' category '{cat}' has no comprehension questions answered",
+                "dimension": dim,
+                "category": cat,
+            }
 
         # Check comprehension score >= 60% across answered categories
         total_correct = 0
