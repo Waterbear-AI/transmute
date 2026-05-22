@@ -806,3 +806,106 @@ class TestSessionPersistence:
 
         asyncio.run(run())
         assert any("Failed to restore events" in r.message for r in caplog.records)
+
+
+class TestListSessionsEndpoint:
+    """Integration tests for GET /api/sessions (BE-005)."""
+
+    def _register_user(self, email: str):
+        resp = client.post("/auth/register", json={
+            "name": "List User",
+            "email": email,
+            "password": "password123",
+        })
+        assert resp.status_code == 200
+        return resp.json()["user_id"], resp.cookies
+
+    def test_list_sessions_returns_200_with_session_and_metadata(self):
+        """GET /api/sessions returns non-archived sessions with message_count and created_at."""
+        user_id, cookies = self._register_user("ls1@example.com")
+        # Create a session
+        sess = client.post("/api/sessions", cookies=cookies)
+        assert sess.status_code == 200
+
+        resp = client.get("/api/sessions", cookies=cookies)
+        assert resp.status_code == 200
+        data = resp.json()
+        assert data["count"] >= 1
+        assert len(data["sessions"]) >= 1
+        session = data["sessions"][0]
+        assert "session_id" in session
+        assert "user_id" in session
+        assert "message_count" in session
+        assert "created_at" in session
+        assert session["user_id"] == user_id
+        assert isinstance(session["message_count"], int)
+
+    def test_list_sessions_message_count_counts_user_events(self):
+        """message_count accurately reflects the number of user-role events in events_json."""
+        import sqlite3
+        import json as _json
+
+        user_id, cookies = self._register_user("ls2@example.com")
+        sess = client.post("/api/sessions", cookies=cookies)
+        session_id = sess.json()["session_id"]
+
+        # Inject 2 user messages and 1 agent message
+        events = [
+            {"content": {"role": "user", "parts": [{"text": "First message"}]}},
+            {"content": {"role": "model", "parts": [{"text": "Agent reply"}]}},
+            {"content": {"role": "user", "parts": [{"text": "Second message"}]}},
+        ]
+        conn = sqlite3.connect(os.environ["DB_PATH"])
+        conn.execute(
+            "UPDATE adk_sessions SET events_json = ? WHERE session_id = ?",
+            (_json.dumps(events), session_id),
+        )
+        conn.commit()
+        conn.close()
+
+        resp = client.get("/api/sessions", cookies=cookies)
+        assert resp.status_code == 200
+        sessions = resp.json()["sessions"]
+        target = next((s for s in sessions if s["session_id"] == session_id), None)
+        assert target is not None
+        assert target["message_count"] == 2
+
+    def test_list_sessions_returns_empty_for_user_with_no_sessions(self):
+        """GET /api/sessions returns empty list when no non-archived sessions exist."""
+        user_id, cookies = self._register_user("ls3@example.com")
+        # The registration archives any prior sessions but there are none yet.
+        # After register, a session is NOT auto-created, so list should be empty.
+        resp = client.get("/api/sessions", cookies=cookies)
+        assert resp.status_code == 200
+        data = resp.json()
+        assert data["count"] == 0
+        assert data["sessions"] == []
+
+    def test_list_sessions_returns_401_when_unauthenticated(self):
+        """GET /api/sessions returns 401 for unauthenticated requests."""
+        fresh_client = TestClient(app)
+        resp = fresh_client.get("/api/sessions")
+        assert resp.status_code == 401
+
+    def test_list_sessions_excludes_archived_sessions(self):
+        """GET /api/sessions only returns non-archived sessions."""
+        import sqlite3
+
+        user_id, cookies = self._register_user("ls4@example.com")
+        sess = client.post("/api/sessions", cookies=cookies)
+        session_id = sess.json()["session_id"]
+
+        # Archive the session manually
+        conn = sqlite3.connect(os.environ["DB_PATH"])
+        conn.execute(
+            "UPDATE adk_sessions SET archived = TRUE WHERE session_id = ?",
+            (session_id,),
+        )
+        conn.commit()
+        conn.close()
+
+        resp = client.get("/api/sessions", cookies=cookies)
+        assert resp.status_code == 200
+        data = resp.json()
+        session_ids = [s["session_id"] for s in data["sessions"]]
+        assert session_id not in session_ids
