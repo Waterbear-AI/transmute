@@ -307,7 +307,26 @@ body {
     color: var(--color-text-muted);
     font-style: italic;
     font-size: 13px;
+    animation: thinking-pulse 1.5s ease-in-out infinite;
 }
+
+@keyframes thinking-pulse {
+    0%, 100% { opacity: 0.5; }
+    50% { opacity: 1; }
+}
+
+/* Markdown content in agent messages */
+.chat-msg--agent p { margin: 0 0 8px 0; }
+.chat-msg--agent p:last-child { margin-bottom: 0; }
+.chat-msg--agent strong { font-weight: 600; }
+.chat-msg--agent h3 { font-size: 16px; font-weight: 600; margin: 12px 0 6px 0; }
+.chat-msg--agent h4 { font-size: 14px; font-weight: 600; margin: 10px 0 4px 0; }
+.chat-msg--agent code { background: rgba(255,255,255,0.08); padding: 1px 4px; border-radius: 3px; font-size: 0.9em; }
+.chat-msg--agent pre { background: rgba(0,0,0,0.3); padding: 10px; border-radius: 6px; overflow-x: auto; margin: 8px 0; }
+.chat-msg--agent pre code { background: none; padding: 0; }
+.chat-msg--agent ul, .chat-msg--agent ol { margin: 6px 0; padding-left: 20px; }
+.chat-msg--agent li { margin: 2px 0; }
+.chat-msg--agent blockquote { border-left: 3px solid var(--color-text-muted); padding-left: 10px; margin: 8px 0; opacity: 0.85; }
 
 /* Tool call display */
 .chat-tool-call {
@@ -498,6 +517,18 @@ body {
     border-color: var(--color-accent-hover);
 }
 
+.session-btn--reset {
+    background: transparent;
+    border-color: #e74c3c;
+    color: #e74c3c;
+    font-weight: 500;
+    font-size: 11px;
+}
+.session-btn--reset:hover {
+    background: #e74c3c;
+    color: white;
+}
+
 /* ── Auth Overlay ───────────────────────────── */
 
 .auth-overlay {
@@ -605,6 +636,40 @@ body {
     font-weight: 600;
     margin-bottom: 12px;
     color: var(--color-text);
+}
+
+/* Likert batch progress */
+.likert-batch-progress {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    margin-bottom: 6px;
+}
+.likert-batch-progress__title {
+    font-size: 13px;
+    font-weight: 600;
+    color: var(--color-text);
+}
+.likert-batch-progress__counter {
+    font-size: 12px;
+    color: var(--color-text-muted);
+}
+.likert-batch-progress--complete .likert-batch-progress__counter {
+    color: var(--color-success, #4caf50);
+    font-weight: 600;
+}
+.likert-batch-bar {
+    height: 3px;
+    background: rgba(255,255,255,0.1);
+    border-radius: 2px;
+    margin-bottom: 12px;
+    overflow: hidden;
+}
+.likert-batch-bar__fill {
+    height: 100%;
+    background: var(--color-accent);
+    border-radius: 2px;
+    transition: width 0.3s ease;
 }
 
 /* Likert card */
