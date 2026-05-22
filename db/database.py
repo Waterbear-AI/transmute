@@ -62,6 +62,22 @@ def _get_migration_files() -> list[tuple[int, Path]]:
     return files
 
 
+def _strip_sql_comments(sql: str) -> str:
+    """Remove SQL line comments (-- ...) from a SQL string.
+
+    Line comments must be stripped before splitting on ';' to avoid
+    treating an entire comment-prefixed block (e.g. '-- note\\nCREATE TABLE')
+    as a comment-only statement.
+    """
+    lines = []
+    for line in sql.splitlines():
+        # Remove inline and full-line comments, preserving the line so that
+        # surrounding whitespace and newlines keep statements separated.
+        stripped = line.split("--")[0]
+        lines.append(stripped)
+    return "\n".join(lines)
+
+
 def run_migrations(db_path: str | None = None) -> int:
     path = db_path or _get_db_path()
     conn = sqlite3.connect(path)
@@ -79,12 +95,32 @@ def run_migrations(db_path: str | None = None) -> int:
                 continue
 
             logger.info("Applying migration %03d: %s", version, filepath.name)
-            sql = filepath.read_text()
-            conn.executescript(sql)
-            conn.execute(
-                "INSERT INTO schema_version (version) VALUES (?)", (version,)
-            )
-            conn.commit()
+            raw_sql = filepath.read_text()
+
+            # Strip line comments BEFORE splitting so that comment-preceded
+            # statements (e.g. "-- note\nCREATE TABLE") are not skipped.
+            sql = _strip_sql_comments(raw_sql)
+
+            # Split into individual statements and execute each one.
+            # executescript() auto-commits and can silently skip failed
+            # statements, so we run them individually within a transaction.
+            statements = [s.strip() for s in sql.split(";") if s.strip()]
+
+            try:
+                for stmt in statements:
+                    conn.execute(stmt)
+                conn.execute(
+                    "INSERT INTO schema_version (version) VALUES (?)", (version,)
+                )
+                conn.commit()
+            except sqlite3.Error as e:
+                conn.rollback()
+                logger.error(
+                    "Migration %03d failed: %s",
+                    version, e,
+                )
+                raise
+
             applied_count += 1
 
         if applied_count:

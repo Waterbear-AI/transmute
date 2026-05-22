@@ -279,11 +279,18 @@ class TestMigrations:
                 "SELECT name FROM sqlite_master WHERE type='table' ORDER BY name"
             ).fetchall()
         ])
+        # Verify events_json column added by migration 003
+        cols = [
+            r[1] for r in conn.execute(
+                "PRAGMA table_info(adk_sessions)"
+            ).fetchall()
+        ]
         conn.close()
         expected = [
             "adk_sessions", "assessment_state", "check_in_log",
             "development_roadmap", "education_progress", "graduation_record",
-            "practice_journal", "profile_snapshots", "safety_log",
+            "moral_ledger", "practice_journal", "profile_snapshots", "safety_log",
             "schema_version", "users",
         ]
         assert tables == expected
+        assert "events_json" in cols

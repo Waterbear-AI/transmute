@@ -14,7 +14,7 @@ from agents.transmutation.flow_engine import (
 )
 from config import Settings, TransmutationSettings, _load_yaml_config
 from models.moral_profile import FlowValues
-from db.database import run_migrations
+from db.database import run_migrations, _strip_sql_comments
 
 
 # --- Password Hashing Tests ---
@@ -53,6 +53,50 @@ class TestCookieSigning:
         assert _verify_cookie("") is None
 
 
+# --- SQL Comment Stripping Tests ---
+
+class TestStripSqlComments:
+    def test_removes_full_line_comment(self):
+        sql = "-- This is a comment\nCREATE TABLE foo (id INTEGER);"
+        result = _strip_sql_comments(sql)
+        assert "--" not in result
+        assert "CREATE TABLE foo" in result
+
+    def test_removes_inline_comment(self):
+        sql = "SELECT * FROM foo -- get all rows\nWHERE id = 1;"
+        result = _strip_sql_comments(sql)
+        assert "-- get all rows" not in result
+        assert "SELECT * FROM foo" in result
+        assert "WHERE id = 1" in result
+
+    def test_preserves_sql_when_no_comments(self):
+        sql = "CREATE TABLE bar (id INTEGER PRIMARY KEY);"
+        result = _strip_sql_comments(sql)
+        assert result.strip() == sql
+
+    def test_empty_string(self):
+        assert _strip_sql_comments("") == ""
+
+    def test_only_comments_yields_empty_lines(self):
+        sql = "-- comment one\n-- comment two"
+        result = _strip_sql_comments(sql)
+        # All meaningful content stripped; only whitespace/newlines remain
+        assert result.strip() == ""
+
+    def test_multistatement_with_comments(self):
+        """Comment-prefixed blocks must not cause CREATE TABLE to be skipped."""
+        sql = (
+            "-- Version tracking\n"
+            "CREATE TABLE schema_version (version INTEGER PRIMARY KEY);\n"
+            "-- Users\n"
+            "CREATE TABLE users (id TEXT PRIMARY KEY);"
+        )
+        result = _strip_sql_comments(sql)
+        statements = [s.strip() for s in result.split(";") if s.strip()]
+        assert len(statements) == 2
+        assert all("CREATE TABLE" in s for s in statements)
+
+
 # --- Migration Runner Tests ---
 
 class TestMigrationRunner:
@@ -61,7 +105,8 @@ class TestMigrationRunner:
             db_path = f.name
         try:
             count = run_migrations(db_path=db_path)
-            assert count == 2
+            # 001_initial, 002_flow_tracking, 003_session_events
+            assert count == 3
 
             import sqlite3
             conn = sqlite3.connect(db_path)
@@ -70,12 +115,19 @@ class TestMigrationRunner:
                     "SELECT name FROM sqlite_master WHERE type='table' ORDER BY name"
                 ).fetchall()
             ]
+            # Verify events_json column was added by migration 003
+            cols = [
+                r[1] for r in conn.execute(
+                    "PRAGMA table_info(adk_sessions)"
+                ).fetchall()
+            ]
             conn.close()
 
             assert "users" in tables
             assert "assessment_state" in tables
             assert "schema_version" in tables
             assert "moral_ledger" in tables
+            assert "events_json" in cols
             assert len(tables) == 12
         finally:
             os.unlink(db_path)
@@ -87,6 +139,67 @@ class TestMigrationRunner:
             run_migrations(db_path=db_path)
             count = run_migrations(db_path=db_path)
             assert count == 0
+        finally:
+            os.unlink(db_path)
+
+    def test_invalid_sql_raises_and_no_version_recorded(self):
+        """A migration with invalid SQL must raise and not record its version."""
+        import sqlite3 as _sqlite3
+        from pathlib import Path
+        import shutil
+
+        with tempfile.TemporaryDirectory() as tmpdir:
+            # Set up a minimal migrations dir with one invalid migration
+            migs_dir = Path(tmpdir) / "migrations"
+            migs_dir.mkdir()
+            (migs_dir / "001_bad.sql").write_text(
+                "-- Bad migration\nINSERT INTO nonexistent_table VALUES (1);"
+            )
+
+            db_path = str(Path(tmpdir) / "test.db")
+
+            # Monkey-patch MIGRATIONS_DIR for the duration of this test
+            import db.database as db_mod
+            original_dir = db_mod.MIGRATIONS_DIR
+            db_mod.MIGRATIONS_DIR = migs_dir
+            try:
+                with pytest.raises(_sqlite3.Error):
+                    run_migrations(db_path=db_path)
+
+                # schema_version must not contain version 1
+                conn = _sqlite3.connect(db_path)
+                rows = conn.execute("SELECT version FROM schema_version").fetchall()
+                conn.close()
+                assert rows == [], "Failed migration must not be recorded in schema_version"
+            finally:
+                db_mod.MIGRATIONS_DIR = original_dir
+
+    def test_applies_migration_003_to_existing_db(self):
+        """Migration 003 adds events_json to an existing db at versions [1, 2]."""
+        import sqlite3 as _sqlite3
+
+        with tempfile.NamedTemporaryFile(suffix=".db", delete=False) as f:
+            db_path = f.name
+        try:
+            # Apply only migrations 001 and 002 first
+            count = run_migrations(db_path=db_path)
+            assert count == 3  # All three applied fresh
+
+            # Simulate a DB that only has versions 1 and 2 by removing version 3
+            conn = _sqlite3.connect(db_path)
+            conn.execute("ALTER TABLE adk_sessions DROP COLUMN events_json")
+            conn.execute("DELETE FROM schema_version WHERE version = 3")
+            conn.commit()
+            conn.close()
+
+            # Now applying migrations should only apply 003
+            count2 = run_migrations(db_path=db_path)
+            assert count2 == 1
+
+            conn = _sqlite3.connect(db_path)
+            cols = [r[1] for r in conn.execute("PRAGMA table_info(adk_sessions)").fetchall()]
+            conn.close()
+            assert "events_json" in cols
         finally:
             os.unlink(db_path)
 
