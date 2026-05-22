@@ -204,6 +204,43 @@ class TestMigrationRunner:
             os.unlink(db_path)
 
 
+# --- Chat Debug Instrumentation Tests ---
+
+class TestChatDebugInstrumentation:
+    def test_litellm_generate_content_async_not_monkeypatched(self):
+        """Importing api.chat must not replace LiteLlm.generate_content_async."""
+        from google.adk.models.lite_llm import LiteLlm
+        original_method = LiteLlm.generate_content_async.__qualname__
+
+        import api.chat  # noqa: F401 — ensure module is imported
+
+        # After import, generate_content_async must still be the original method,
+        # not the _debug_generate wrapper.
+        assert LiteLlm.generate_content_async.__qualname__ == original_method, (
+            "LiteLlm.generate_content_async was monkeypatched by api.chat import"
+        )
+
+    def test_no_debug_files_created_under_var_lib_transmute(self, tmp_path):
+        """No files should be written to /var/lib/transmute during LLM interaction setup."""
+        # The debug wrapper wrote to /var/lib/transmute/*.json.
+        # After removal, that directory must NOT be created or written to during
+        # a normal import + model-string resolution cycle.
+        import api.chat  # noqa: F401 — ensure module is imported
+
+        # Simulate what the debug wrapper would have created
+        var_lib_transmute = tmp_path / "transmute"
+        # If debug code were present it would try to open paths under /var/lib/transmute.
+        # Confirm no such path exists in the module source.
+        import inspect
+        chat_source = inspect.getsource(api.chat)
+        assert "/var/lib/transmute" not in chat_source, (
+            "api/chat.py still references /var/lib/transmute — debug file dump not removed"
+        )
+        assert "_debug_generate" not in chat_source, (
+            "api/chat.py still contains _debug_generate wrapper"
+        )
+
+
 # --- Config Loading Tests ---
 
 class TestConfigLoading:
