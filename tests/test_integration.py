@@ -467,6 +467,159 @@ class TestHistoryEndpoint:
         assert user_msgs[0]["text"] == "Hello agent!"
 
 
+class TestResetEndpoint:
+    """Integration tests for POST /api/sessions/reset (BE-004)."""
+
+    def _register_user(self, email: str):
+        """Register a user and return (user_id, cookies)."""
+        resp = client.post("/auth/register", json={
+            "name": "Reset User",
+            "email": email,
+            "password": "password123",
+        })
+        assert resp.status_code == 200
+        return resp.json()["user_id"], resp.cookies
+
+    def _seed_user_data(self, user_id: str):
+        """Insert a row into every user-scoped table for the given user."""
+        import sqlite3
+        import uuid
+        conn = sqlite3.connect(os.environ["DB_PATH"])
+        # assessment_state
+        conn.execute(
+            "INSERT OR IGNORE INTO assessment_state (id, user_id, responses) VALUES (?, ?, ?)",
+            (str(uuid.uuid4()), user_id, "{}"),
+        )
+        # profile_snapshots
+        conn.execute(
+            "INSERT OR IGNORE INTO profile_snapshots (id, user_id, scores) VALUES (?, ?, ?)",
+            (str(uuid.uuid4()), user_id, "{}"),
+        )
+        # moral_ledger
+        conn.execute(
+            "INSERT OR IGNORE INTO moral_ledger (id, user_id, c_plus, c_minus) VALUES (?, ?, ?, ?)",
+            (str(uuid.uuid4()), user_id, 1.0, 0.0),
+        )
+        # safety_log (must be retained after reset)
+        conn.execute(
+            "INSERT OR IGNORE INTO safety_log (id, user_id, reason) VALUES (?, ?, ?)",
+            (str(uuid.uuid4()), user_id, "should survive reset"),
+        )
+        conn.commit()
+        conn.close()
+
+    def _count_rows(self, table: str, user_id: str) -> int:
+        import sqlite3
+        conn = sqlite3.connect(os.environ["DB_PATH"])
+        count = conn.execute(
+            f"SELECT COUNT(*) FROM {table} WHERE user_id = ?", (user_id,)
+        ).fetchone()[0]
+        conn.close()
+        return count
+
+    def test_reset_returns_200_with_new_session(self):
+        """POST /reset returns 200 and a new SessionResponse for authenticated user."""
+        user_id, cookies = self._register_user("r1@example.com")
+        resp = client.post("/api/sessions/reset", cookies=cookies)
+        assert resp.status_code == 200
+        data = resp.json()
+        assert "session_id" in data
+        assert data["user_id"] == user_id
+
+    def test_reset_deletes_user_domain_data(self):
+        """POST /reset wipes assessment_state, profile_snapshots, and other domain data."""
+        user_id, cookies = self._register_user("r2@example.com")
+        self._seed_user_data(user_id)
+
+        assert self._count_rows("assessment_state", user_id) >= 1
+        assert self._count_rows("profile_snapshots", user_id) >= 1
+
+        resp = client.post("/api/sessions/reset", cookies=cookies)
+        assert resp.status_code == 200
+
+        assert self._count_rows("assessment_state", user_id) == 0
+        assert self._count_rows("profile_snapshots", user_id) == 0
+
+    def test_reset_deletes_moral_ledger(self):
+        """POST /reset must delete moral_ledger rows for the user (R11)."""
+        user_id, cookies = self._register_user("r3@example.com")
+        self._seed_user_data(user_id)
+
+        assert self._count_rows("moral_ledger", user_id) >= 1
+
+        resp = client.post("/api/sessions/reset", cookies=cookies)
+        assert resp.status_code == 200
+
+        assert self._count_rows("moral_ledger", user_id) == 0
+
+    def test_reset_retains_safety_log(self):
+        """POST /reset must NOT delete safety_log rows (audit trail retention)."""
+        user_id, cookies = self._register_user("r4@example.com")
+        self._seed_user_data(user_id)
+
+        before = self._count_rows("safety_log", user_id)
+        assert before >= 1
+
+        resp = client.post("/api/sessions/reset", cookies=cookies)
+        assert resp.status_code == 200
+
+        after = self._count_rows("safety_log", user_id)
+        assert after == before
+
+    def test_reset_resets_current_phase_to_orientation(self):
+        """POST /reset must set users.current_phase back to 'orientation'."""
+        import sqlite3
+
+        user_id, cookies = self._register_user("r5@example.com")
+
+        # Simulate phase advancement
+        conn = sqlite3.connect(os.environ["DB_PATH"])
+        conn.execute(
+            "UPDATE users SET current_phase = 'assessment' WHERE id = ?", (user_id,)
+        )
+        conn.commit()
+        conn.close()
+
+        resp = client.post("/api/sessions/reset", cookies=cookies)
+        assert resp.status_code == 200
+
+        conn = sqlite3.connect(os.environ["DB_PATH"])
+        phase = conn.execute(
+            "SELECT current_phase FROM users WHERE id = ?", (user_id,)
+        ).fetchone()[0]
+        conn.close()
+        assert phase == "orientation"
+
+    def test_reset_returns_401_when_unauthenticated(self):
+        """POST /reset for an unauthenticated request returns 401."""
+        fresh_client = TestClient(app)
+        resp = fresh_client.post("/api/sessions/reset")
+        assert resp.status_code == 401
+
+    def test_reset_rate_limit_returns_429(self):
+        """POST /reset returns 429 after exceeding 5 requests/hour."""
+        limiter.enabled = True
+        limiter.reset()
+        try:
+            rate_client = TestClient(app)
+            reg = rate_client.post("/auth/register", json={
+                "name": "Reset Rate User",
+                "email": "rrate@example.com",
+                "password": "password123",
+            })
+            cookies = reg.cookies
+
+            got_429 = False
+            for i in range(10):
+                resp = rate_client.post("/api/sessions/reset", cookies=cookies)
+                if resp.status_code == 429:
+                    got_429 = True
+                    break
+            assert got_429, "Expected 429 after exceeding reset rate limit"
+        finally:
+            limiter.enabled = False
+
+
 class TestSessionPersistence:
     """Integration tests for SqliteSessionService event persistence (BE-002)."""
 

@@ -3,13 +3,14 @@ import logging
 from datetime import datetime
 from typing import Any, Optional
 
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, Depends, HTTPException, Request
 from pydantic import BaseModel, Field
 
 from api.auth import get_current_user_id
 from agents.transmutation.session_service import SqliteSessionService
 from agents.transmutation.question_bank import get_question_bank
 from db.database import get_db_session
+from rate_limit import limiter
 
 logger = logging.getLogger(__name__)
 
@@ -268,10 +269,18 @@ async def get_session_history(
 
 
 @router.post("/reset", response_model=SessionResponse)
+@limiter.limit("5/hour")
 async def reset_session(
+    request: Request,
     user_id: str = Depends(get_current_user_id),
 ):
-    """Full reset: wipe all progress and start fresh from orientation."""
+    """Full reset: wipe all progress and start fresh from orientation.
+
+    Deletes all user-scoped domain data (assessment_state, profile_snapshots,
+    education_progress, development_roadmap, practice_journal, graduation_record,
+    check_in_log, moral_ledger), archives sessions, resets current_phase to
+    'orientation', and creates a fresh session. safety_log is retained.
+    """
     with get_db_session() as conn:
         # Reset user phase to orientation
         conn.execute(
@@ -317,6 +326,12 @@ async def reset_session(
             "DELETE FROM check_in_log WHERE user_id = ?",
             (user_id,),
         )
+        # Clear moral ledger (R11: must be wiped on reset)
+        conn.execute(
+            "DELETE FROM moral_ledger WHERE user_id = ?",
+            (user_id,),
+        )
+        # NOTE: safety_log is intentionally NOT deleted — it is an audit trail
 
     logger.info("Full reset for user %s", user_id)
 
