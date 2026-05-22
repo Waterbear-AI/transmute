@@ -46,9 +46,6 @@ def get_assessment_state(user_id: str) -> dict[str, Any]:
     if not row:
         return {
             "exists": False,
-            "responses": {},
-            "scenario_responses": {},
-            "completed_dimensions": [],
             "current_phase": "assessment",
             "progress": _compute_progress({}, {}),
         }
@@ -57,12 +54,9 @@ def get_assessment_state(user_id: str) -> dict[str, Any]:
     scenario_responses = json.loads(row["scenario_responses"] or "{}")
     completed_dims = json.loads(row["completed_dimensions"] or "[]")
 
+    # Return summary only — full responses stay in the DB to keep context small
     return {
         "exists": True,
-        "id": row["id"],
-        "session_id": row["session_id"],
-        "responses": responses,
-        "scenario_responses": scenario_responses,
         "completed_dimensions": completed_dims,
         "current_phase": row["current_phase"],
         "progress": _compute_progress(responses, scenario_responses),
@@ -224,7 +218,10 @@ def advance_phase(user_id: str, new_phase: str, reason: str = "") -> dict[str, A
         )
 
     return {
+        "event_type": "phase.transition",
         "success": True,
+        "from": current,
+        "to": new_phase,
         "previous_phase": current,
         "new_phase": new_phase,
         "reason": reason,
@@ -382,6 +379,57 @@ def flag_safety_concern(user_id: str, session_id: str, reason: str) -> dict[str,
     }
 
 
+def get_next_question_batch(
+    user_id: str, dimension: str, batch_size: int = 5
+) -> dict[str, Any]:
+    """Get the next batch of unanswered questions for a dimension.
+
+    Call this to discover which question IDs to present next.
+    Returns question IDs and metadata for the next unanswered questions
+    in the specified dimension. Use the returned question_ids with
+    present_question_batch() to actually show them to the user.
+
+    Args:
+        user_id: The user's ID.
+        dimension: The dimension name (e.g. "Emotional Awareness", "Social Awareness").
+        batch_size: Number of questions to return (default 5, max 10).
+    """
+    qb = get_question_bank()
+    dim_questions = qb.get_questions_by_dimension(dimension)
+
+    if not dim_questions:
+        available = qb.get_dimensions()
+        return {
+            "error": f"Unknown dimension: {dimension}",
+            "available_dimensions": available,
+        }
+
+    # Get already-answered question IDs
+    with get_db_session() as conn:
+        row = conn.execute(
+            "SELECT responses FROM assessment_state WHERE user_id = ? ORDER BY created_at DESC LIMIT 1",
+            (user_id,),
+        ).fetchone()
+
+    answered_ids = set()
+    if row:
+        responses = json.loads(row["responses"] or "{}")
+        answered_ids = set(responses.keys())
+
+    # Filter to unanswered questions in this dimension
+    unanswered = [q for q in dim_questions if q["id"] not in answered_ids]
+    batch = unanswered[: min(batch_size, 10)]
+
+    return {
+        "dimension": dimension,
+        "question_ids": [q["id"] for q in batch],
+        "questions_preview": [{"id": q["id"], "text": q["text"][:80]} for q in batch],
+        "remaining_in_dimension": len(unanswered) - len(batch),
+        "total_in_dimension": len(dim_questions),
+        "answered_in_dimension": len(dim_questions) - len(unanswered),
+    }
+
+
 def present_question_batch(user_id: str, question_ids: list[str]) -> dict[str, Any]:
     """Present a batch of Likert questions to the user.
 
@@ -402,15 +450,29 @@ def present_question_batch(user_id: str, question_ids: list[str]) -> dict[str, A
     if missing:
         logger.warning("Question IDs not found: %s", missing)
 
-    # Include scale definitions so the frontend can render labels
+    # Resolve scale labels into each question for frontend rendering
     scale_types = qb.scale_types
+    enriched = []
+    for q in questions:
+        eq = dict(q)
+        st = scale_types.get(q.get("scale_type", ""), {})
+        eq["scale_labels"] = st.get("labels", ["Strongly Disagree", "Disagree", "Neutral", "Agree", "Strongly Agree"])
+        enriched.append(eq)
 
+    # The full question data is sent to the frontend via SSE (event_type triggers it).
+    # But we return a slim version to the agent to keep context window small —
+    # the agent doesn't need full question text/labels in its conversation history.
+    batch_id = f"batch_{enriched[0]['dimension'].lower().replace(' ', '_')}_{len(enriched)}" if enriched else "batch_empty"
     return {
         "event_type": "assessment.question_batch",
-        "questions": questions,
-        "scale_types": scale_types,
-        "count": len(questions),
+        "batch_id": batch_id,
+        "sub_dimension": enriched[0].get("sub_dimension", "") if enriched else "",
+        "dimension": enriched[0].get("dimension", "") if enriched else "",
+        "questions": enriched,  # Full data needed by SSE/frontend
+        "count": len(enriched),
         "missing": missing,
+        # Agent-facing summary (the SSE layer strips 'questions' after emitting)
+        "_agent_summary": f"Presented {len(enriched)} questions to user. Wait for their responses.",
     }
 
 
@@ -710,14 +772,28 @@ def save_profile_snapshot(user_id: str, interpretation: str) -> dict[str, Any]:
                 ),
             )
 
-    return {
+    # Build response with all data the frontend profile tab needs
+    quadrant_data = cached["quadrant"]
+    quadrant_name = quadrant_data.get("quadrant", "Unknown") if isinstance(quadrant_data, dict) else str(quadrant_data)
+
+    response: dict[str, Any] = {
         "event_type": "profile.snapshot",
         "saved": True,
         "snapshot_id": snapshot_id,
         "scores": cached["scores"],
-        "quadrant": cached["quadrant"],
+        "quadrant": quadrant_name,
+        "quadrant_placement": quadrant_data,
         "interpretation": interpretation,
     }
+
+    # Spider chart is persisted in DB — frontend fetches it via /api/results.
+    # NOT included here because base64 PNG (~260KB) would blow up the LLM context window.
+    response["has_spider_chart"] = cached.get("spider_chart") is not None
+
+    if flow_profile:
+        response["flow_data"] = flow_profile.model_dump()
+
+    return response
 
 
 # ── Education Agent tools ──────────────────────────────────────────────
