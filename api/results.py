@@ -22,8 +22,11 @@ class ProfileSnapshotResponse(BaseModel):
     id: str
     scores: Optional[dict[str, Any]] = None
     quadrant_placement: Optional[dict[str, Any]] = None
+    quadrant: Optional[str] = None
     interpretation: Optional[str] = None
     has_spider_chart: bool = False
+    spider_data: Optional[dict[str, Any]] = None
+    flow_data: Optional[dict[str, Any]] = None
     created_at: Optional[str] = None
 
 
@@ -120,18 +123,36 @@ def get_results(
 
         # Get profile snapshots
         profile_rows = conn.execute(
-            "SELECT id, scores, quadrant_placement, interpretation, spider_chart, created_at FROM profile_snapshots WHERE user_id = ? ORDER BY created_at DESC",
+            "SELECT id, scores, quadrant_placement, interpretation, spider_chart, flow_data, created_at FROM profile_snapshots WHERE user_id = ? ORDER BY created_at DESC",
             (user_id,),
         ).fetchall()
 
         profiles = []
         for row in profile_rows:
+            qp = json.loads(row["quadrant_placement"]) if row["quadrant_placement"] else None
+            quadrant_name = qp.get("quadrant") if isinstance(qp, dict) else None
+
+            spider_data = None
+            if row["spider_chart"]:
+                import base64
+                spider_data = {"image_base64": base64.b64encode(row["spider_chart"]).decode("ascii")}
+
+            flow_data = None
+            if row["flow_data"]:
+                try:
+                    flow_data = json.loads(row["flow_data"]) if isinstance(row["flow_data"], str) else row["flow_data"]
+                except Exception:
+                    pass
+
             profiles.append(ProfileSnapshotResponse(
                 id=row["id"],
                 scores=json.loads(row["scores"]) if row["scores"] else None,
-                quadrant_placement=json.loads(row["quadrant_placement"]) if row["quadrant_placement"] else None,
+                quadrant_placement=qp,
+                quadrant=quadrant_name,
                 interpretation=row["interpretation"],
                 has_spider_chart=row["spider_chart"] is not None,
+                spider_data=spider_data,
+                flow_data=flow_data,
                 created_at=row["created_at"],
             ))
 

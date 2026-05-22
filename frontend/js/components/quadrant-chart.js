@@ -17,15 +17,16 @@ const QuadrantChart = (() => {
     /**
      * Render a quadrant chart into a container element.
      * @param {HTMLElement} containerEl - DOM element to render into
-     * @param {Object|null} flowData - flow_data from profile snapshot
+     * @param {Object|null} quadrantPlacement - {x, y, archetype} from scoring engine
+     * @param {Object|null} flowData - flow_data from profile snapshot (optional, for future use)
      */
-    function render(containerEl, flowData) {
+    function render(containerEl, quadrantPlacement, flowData) {
         containerEl.textContent = '';
 
-        if (!flowData || !flowData.levels || flowData.levels.length === 0) {
+        if (!quadrantPlacement && (!flowData || !flowData.levels || flowData.levels.length === 0)) {
             const placeholder = document.createElement('div');
             placeholder.className = 'quadrant-chart-placeholder';
-            Sanitize.setText(placeholder, 'Flow data not yet computed. Complete assessment to see your quadrant position.');
+            Sanitize.setText(placeholder, 'Complete assessment to see your quadrant position.');
             containerEl.appendChild(placeholder);
             return;
         }
@@ -47,10 +48,20 @@ const QuadrantChart = (() => {
 
         containerEl.appendChild(wrapper);
 
-        // Compute user position from latest level
-        const latest = flowData.levels[flowData.levels.length - 1];
-        const userF = latest.filtering || 0;
-        const userA = latest.amplification || 0;
+        // Use quadrant_placement (Likert-derived) if available, fall back to flow_data
+        let userF, userA;
+        if (quadrantPlacement && (quadrantPlacement.x != null || quadrantPlacement.y != null)) {
+            // quadrant_placement uses x=amplification, y=filtering
+            userA = quadrantPlacement.x || 0;
+            userF = quadrantPlacement.y || 0;
+        } else if (flowData && flowData.levels && flowData.levels.length > 0) {
+            const latest = flowData.levels[flowData.levels.length - 1];
+            userF = latest.filtering || 0;
+            userA = latest.amplification || 0;
+        } else {
+            userF = 0;
+            userA = 0;
+        }
 
         function draw() {
             const rect = wrapper.getBoundingClientRect();
