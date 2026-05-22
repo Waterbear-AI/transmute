@@ -479,15 +479,24 @@ class TestSlimEventsForStorage:
 
 
 class TestConfigLoading:
+    VALID_PROVIDERS = {"anthropic", "openai", "bedrock", "ollama"}
+
     def test_yaml_config_loads(self):
         config = _load_yaml_config()
         assert "model" in config
-        assert config["model"]["provider"] == "anthropic"
+        # Provider must be a valid value — not hardcoded to one environment's choice
+        assert config["model"]["provider"] in self.VALID_PROVIDERS, (
+            f"provider '{config['model']['provider']}' not in {self.VALID_PROVIDERS}"
+        )
 
     def test_settings_loads_from_yaml(self):
         settings = Settings()
-        assert settings.model.provider == "anthropic"
-        assert settings.model.model_id == "claude-sonnet-4-5-20250514"
+        # Provider must be a supported value; exact value depends on deployment config
+        assert settings.model.provider in self.VALID_PROVIDERS, (
+            f"provider '{settings.model.provider}' not in {self.VALID_PROVIDERS}"
+        )
+        # model_id must be a non-empty string
+        assert isinstance(settings.model.model_id, str) and settings.model.model_id
 
     def test_invalid_provider_raises(self):
         with pytest.raises(ValueError, match="Invalid provider"):

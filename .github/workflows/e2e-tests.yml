@@ -1,13 +1,36 @@
-name: E2E Tests
+name: Test Suite
 
 on:
   pull_request:
     branches: [main]
 
 jobs:
+  unit-integration:
+    name: Unit & Integration Tests
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.13'
+
+      - name: Install Python dependencies
+        run: pip install -r requirements.txt
+
+      - name: Run unit and integration tests
+        run: python3 -m pytest tests/test_unit.py tests/test_integration.py -v --tb=short
+        env:
+          DB_PATH: /tmp/test_transmutation.db
+          OPENAI_API_KEY: test-key
+
   e2e:
+    name: E2E Tests (Playwright)
     runs-on: ubuntu-latest
     timeout-minutes: 15
+    needs: unit-integration
 
     steps:
       - uses: actions/checkout@v4
