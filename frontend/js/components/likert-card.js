@@ -6,30 +6,69 @@ const LikertCard = (() => {
     /**
      * Create a LikertBatchCard from an assessment.question_batch SSE event.
      * data: {batch_id, sub_dimension, dimension, questions: [{id, text, scale_type, scale_labels}]}
+     * answeredResponses: optional {question_id: {score, ...}} for pre-filling history
      */
-    function create(data) {
+    function create(data, answeredResponses) {
+        const answers = answeredResponses || {};
         const card = document.createElement('div');
         card.className = 'widget-card';
         card.setAttribute('role', 'region');
         card.setAttribute('aria-label', 'Assessment questions: ' + (data.sub_dimension || data.dimension));
 
-        const title = document.createElement('div');
-        title.className = 'widget-card__title';
-        Sanitize.setText(title, data.sub_dimension || data.dimension);
-        card.appendChild(title);
-
         const answeredSet = new Set();
         const totalQuestions = data.questions.length;
 
+        // Pre-count already answered questions
         for (const q of data.questions) {
-            const questionEl = _createQuestion(q, data.batch_id, answeredSet, totalQuestions);
+            if (answers[q.id]) answeredSet.add(q.id);
+        }
+
+        // Batch progress header
+        const progressHeader = document.createElement('div');
+        progressHeader.className = 'likert-batch-progress';
+
+        const titleEl = document.createElement('span');
+        titleEl.className = 'likert-batch-progress__title';
+        Sanitize.setText(titleEl, data.sub_dimension || data.dimension || 'Questions');
+        progressHeader.appendChild(titleEl);
+
+        const counterEl = document.createElement('span');
+        counterEl.className = 'likert-batch-progress__counter';
+        progressHeader.appendChild(counterEl);
+
+        card.appendChild(progressHeader);
+
+        // Mini progress bar
+        const miniBar = document.createElement('div');
+        miniBar.className = 'likert-batch-bar';
+        const miniBarFill = document.createElement('div');
+        miniBarFill.className = 'likert-batch-bar__fill';
+        miniBar.appendChild(miniBarFill);
+        card.appendChild(miniBar);
+
+        const updateProgress = () => {
+            const count = answeredSet.size;
+            Sanitize.setText(counterEl, count + ' / ' + totalQuestions + ' answered');
+            miniBarFill.style.width = (count / totalQuestions * 100) + '%';
+            if (count === totalQuestions) {
+                progressHeader.classList.add('likert-batch-progress--complete');
+                Sanitize.setText(counterEl, 'All done!');
+            }
+        };
+
+        // Set initial progress
+        updateProgress();
+
+        for (const q of data.questions) {
+            const prefilled = answers[q.id] || null;
+            const questionEl = _createQuestion(q, data.batch_id, answeredSet, totalQuestions, updateProgress, prefilled);
             card.appendChild(questionEl);
         }
 
         return card;
     }
 
-    function _createQuestion(question, batchId, answeredSet, totalQuestions) {
+    function _createQuestion(question, batchId, answeredSet, totalQuestions, onAnswer, prefilled) {
         const container = document.createElement('div');
         container.className = 'likert-question';
 
@@ -49,7 +88,7 @@ const LikertCard = (() => {
         scale.setAttribute('role', 'radiogroup');
         scale.setAttribute('aria-label', question.text);
 
-        const labels = question.scale_labels || ['SD', 'D', 'N', 'A', 'SA'];
+        const labels = question.scale_labels || ['Strongly Disagree', 'Disagree', 'Neutral', 'Agree', 'Strongly Agree'];
 
         labels.forEach((label, index) => {
             const btn = document.createElement('button');
@@ -84,6 +123,9 @@ const LikertCard = (() => {
                         b.disabled = true;
                     });
 
+                    // Update batch progress
+                    onAnswer();
+
                     // Check batch completion
                     if (answeredSet.size === totalQuestions) {
                         _notifyBatchComplete(batchId);
@@ -115,6 +157,19 @@ const LikertCard = (() => {
         });
 
         container.appendChild(scale);
+
+        // Pre-fill if already answered (history mode)
+        if (prefilled && prefilled.score != null) {
+            const selectedIdx = prefilled.score - 1; // score is 1-based
+            const buttons = scale.querySelectorAll('.likert-option');
+            if (selectedIdx >= 0 && selectedIdx < buttons.length) {
+                buttons[selectedIdx].classList.add('likert-option--selected');
+                buttons[selectedIdx].setAttribute('aria-checked', 'true');
+                buttons.forEach(b => { b.disabled = true; });
+                checkEl.hidden = false;
+            }
+        }
+
         return container;
     }
 

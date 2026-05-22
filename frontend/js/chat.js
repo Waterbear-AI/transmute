@@ -6,6 +6,7 @@ const Chat = (() => {
     let _currentMessageEl = null;
     let _isReadOnly = false;
     let _isLoading = false;
+    let _pendingWidgets = [];
 
     const _messagesEl = () => document.getElementById('chat-messages');
 
@@ -45,10 +46,12 @@ const Chat = (() => {
         input.value = '';
         _appendUserMessage(message);
         _setLoading(true);
+        _showThinkingIndicator();
         try {
             await sendMessage(sessionId, message);
         } finally {
             _setLoading(false);
+            input.focus();
         }
     }
 
@@ -131,8 +134,9 @@ const Chat = (() => {
             }
         }
 
-        // Finalize any remaining agent message
+        // Finalize any remaining agent message and flush buffered widgets
         _currentMessageEl = null;
+        _flushPendingWidgets();
     }
 
     /**
@@ -187,14 +191,15 @@ const Chat = (() => {
 
             case 'agent.message.complete':
                 _finalizeAgentMessage(data.text);
+                _flushPendingWidgets();
                 break;
 
             case 'tool.call':
-                _appendToolCall(data.name, data.args);
+                // Tool calls are internal agent mechanics — don't show to users
                 break;
 
             case 'tool.result':
-                _appendToolResult(data.name, data.response);
+                // Tool results are internal — don't show to users
                 break;
 
             case 'error':
@@ -214,17 +219,17 @@ const Chat = (() => {
                 Toast.show('Entering ' + data.to.charAt(0).toUpperCase() + data.to.slice(1) + ' phase', 'success');
                 break;
 
-            // Domain events — dispatch to widget creators or Results panel
+            // Domain events — buffer widgets to display after agent message
             case 'assessment.question_batch':
-                _appendWidget(() => LikertCard.create(data));
+                _pendingWidgets.push(() => LikertCard.create(data));
                 break;
 
             case 'assessment.scenario':
-                _appendWidget(() => ScenarioCard.create(data));
+                _pendingWidgets.push(() => ScenarioCard.create(data));
                 break;
 
             case 'education.comprehension':
-                _appendWidget(() => StructuredChoice.create(data));
+                _pendingWidgets.push(() => StructuredChoice.create(data));
                 break;
 
             case 'assessment.progress':
@@ -243,6 +248,53 @@ const Chat = (() => {
             default:
                 console.log('[Chat] Unhandled SSE event:', eventType, data);
         }
+    }
+
+    // ── Markdown conversion ──────────────────────
+
+    /**
+     * Convert basic markdown to HTML. The output is then run through
+     * Sanitize.sanitizeHTML() so only allowlisted tags survive.
+     */
+    function _markdownToHTML(text) {
+        let html = text;
+        // Code blocks (``` ... ```)
+        html = html.replace(/```(\w*)\n?([\s\S]*?)```/g, '<pre><code>$2</code></pre>');
+        // Inline code
+        html = html.replace(/`([^`]+)`/g, '<code>$1</code>');
+        // Headers (### and ####)
+        html = html.replace(/^#### (.+)$/gm, '<h4>$1</h4>');
+        html = html.replace(/^### (.+)$/gm, '<h3>$1</h3>');
+        // Horizontal rules
+        html = html.replace(/^---+$/gm, '<br>');
+        // Bold + italic
+        html = html.replace(/\*\*\*(.+?)\*\*\*/g, '<strong><em>$1</em></strong>');
+        // Bold
+        html = html.replace(/\*\*(.+?)\*\*/g, '<strong>$1</strong>');
+        // Italic
+        html = html.replace(/\*(.+?)\*/g, '<em>$1</em>');
+        // Unordered lists (consecutive lines starting with - )
+        html = html.replace(/(?:^|\n)((?:- .+\n?)+)/g, (_, block) => {
+            const items = block.trim().split('\n').map(line =>
+                '<li>' + line.replace(/^- /, '') + '</li>'
+            ).join('');
+            return '<ul>' + items + '</ul>';
+        });
+        // Ordered lists (consecutive lines starting with N. )
+        html = html.replace(/(?:^|\n)((?:\d+\. .+\n?)+)/g, (_, block) => {
+            const items = block.trim().split('\n').map(line =>
+                '<li>' + line.replace(/^\d+\. /, '') + '</li>'
+            ).join('');
+            return '<ol>' + items + '</ol>';
+        });
+        // Paragraphs: double newlines become <p> breaks
+        html = html.replace(/\n{2,}/g, '</p><p>');
+        // Single newlines become <br>
+        html = html.replace(/\n/g, '<br>');
+        html = '<p>' + html + '</p>';
+        // Clean up empty paragraphs
+        html = html.replace(/<p>\s*<\/p>/g, '');
+        return html;
     }
 
     // ── Message rendering ──────────────────────
@@ -284,12 +336,14 @@ const Chat = (() => {
     function _finalizeAgentMessage(fullText) {
         _removeThinkingIndicator();
         if (!_currentMessageEl) {
-            // No chunks were streamed — create the message element now
             _currentMessageEl = document.createElement('div');
             _currentMessageEl.className = 'chat-msg chat-msg--agent';
             _messagesEl().appendChild(_currentMessageEl);
         }
-        Sanitize.setText(_currentMessageEl, fullText);
+        // Render markdown through the XSS-safe sanitizer
+        const html = _markdownToHTML(fullText);
+        _currentMessageEl.textContent = '';
+        _currentMessageEl.appendChild(Sanitize.sanitizeHTML(html));
         _currentMessageEl = null;
         _scrollToBottom();
     }
@@ -356,6 +410,13 @@ const Chat = (() => {
         _appendSystemMessage('Phase transition: ' + fromLabel + ' \u2192 ' + toLabel);
     }
 
+    function _flushPendingWidgets() {
+        for (const createFn of _pendingWidgets) {
+            _appendWidget(createFn);
+        }
+        _pendingWidgets = [];
+    }
+
     function _appendWidget(createFn) {
         try {
             const el = createFn();
@@ -384,19 +445,50 @@ const Chat = (() => {
     /**
      * Load conversation history for a session (for viewing past sessions).
      */
-    function renderHistory(messages) {
+    function renderHistory(messages, answeredResponses) {
         clear();
+        const answers = answeredResponses || {};
         for (const msg of messages) {
             if (msg.role === 'user') {
                 _appendUserMessage(msg.text);
             } else if (msg.role === 'agent') {
                 const el = document.createElement('div');
                 el.className = 'chat-msg chat-msg--agent';
-                Sanitize.setText(el, msg.text);
+                const html = _markdownToHTML(msg.text);
+                el.appendChild(Sanitize.sanitizeHTML(html));
                 _messagesEl().appendChild(el);
+            } else if (msg.role === 'widget') {
+                _renderHistoryWidget(msg.event_type, msg.data, answers);
             } else if (msg.role === 'system') {
                 _appendSystemMessage(msg.text);
             }
+        }
+        _scrollToBottom();
+    }
+
+    function _renderHistoryWidget(eventType, data, answers) {
+        try {
+            let el = null;
+            switch (eventType) {
+                case 'assessment.question_batch':
+                    el = LikertCard.create(data, answers);
+                    break;
+                case 'assessment.scenario':
+                    el = ScenarioCard.create(data);
+                    break;
+                case 'education.comprehension':
+                    el = StructuredChoice.create(data);
+                    break;
+                case 'phase.transition':
+                    _appendPhaseTransition(data.from, data.to);
+                    return;
+            }
+            if (el) {
+                _messagesEl().appendChild(el);
+                _scrollToBottom();
+            }
+        } catch (err) {
+            console.error('[Chat] History widget render failed:', eventType, err);
         }
     }
 

@@ -15,6 +15,7 @@ const Results = (() => {
     let _currentPhase = 'orientation';
     let _activeTab = 'orientation';
     let _resultsData = {};
+    let _userId = null;
 
     /**
      * Update the results panel with data from /api/results/{user_id}.
@@ -22,6 +23,7 @@ const Results = (() => {
      */
     function update(data, currentPhase) {
         const d = data || {};
+        if (d.user_id) _userId = d.user_id;
         _resultsData = {};
 
         // Map API response to internal data keys
@@ -60,7 +62,8 @@ const Results = (() => {
     function handleSSEEvent(eventType, data) {
         switch (eventType) {
             case 'assessment.progress':
-                _resultsData.assessment_state = data;
+                // SSE data shape: { progress: { answered, total, dimension_progress } }
+                _resultsData.assessment_state = data.progress || data;
                 if (_activeTab === 'assessment') _renderTabContent('assessment');
                 // Ensure tab is visible
                 _renderTabs();
@@ -70,6 +73,18 @@ const Results = (() => {
                 _resultsData.profile_snapshots = data;
                 if (_activeTab === 'profile') _renderTabContent('profile');
                 _renderTabs();
+                // Re-fetch full results to get spider chart (binary data not sent via SSE)
+                if (_userId) {
+                    fetch('/api/results/' + encodeURIComponent(_userId))
+                        .then(r => r.ok ? r.json() : null)
+                        .then(results => {
+                            if (results && results.latest_profile) {
+                                _resultsData.profile_snapshots = results.latest_profile;
+                                if (_activeTab === 'profile') _renderTabContent('profile');
+                            }
+                        })
+                        .catch(() => {});
+                }
                 break;
 
             case 'education.progress':
@@ -160,6 +175,10 @@ const Results = (() => {
         if (tab.id === 'orientation') {
             return _currentPhase === 'orientation';
         }
+        // Assessment: visible when in assessment phase or has data
+        if (tab.id === 'assessment') {
+            return _currentPhase === 'assessment' || !!_resultsData.assessment_state;
+        }
         // Other tabs: visible when their data exists
         if (tab.dataKey) {
             return !!_resultsData[tab.dataKey];
@@ -234,37 +253,73 @@ const Results = (() => {
 
     function _renderAssessment(el) {
         const data = _resultsData.assessment_state;
-        if (!data) return;
 
         const header = document.createElement('h3');
+        header.id = 'assessment-progress-header';
         Sanitize.setText(header, 'Assessment Progress');
         el.appendChild(header);
 
+        const answered = (data && data.answered) || 0;
+        const total = (data && data.total) || 200;
+
         // Overall progress
         const overall = document.createElement('div');
+        overall.id = 'assessment-progress-overall';
         overall.style.margin = '12px 0';
-        const answered = data.answered || 0;
-        const total = data.total || 200;
         Sanitize.setText(overall, answered + ' / ' + total + ' questions answered');
         el.appendChild(overall);
 
-        const bar = _createProgressBar(answered / total);
+        const bar = _createProgressBar(total > 0 ? answered / total : 0);
+        bar.id = 'assessment-progress-bar';
         el.appendChild(bar);
 
+        // Percentage
+        const pct = document.createElement('div');
+        pct.style.color = 'var(--color-text-muted)';
+        pct.style.fontSize = '13px';
+        pct.style.marginTop = '4px';
+        Sanitize.setText(pct, Math.round((answered / Math.max(total, 1)) * 100) + '% complete');
+        el.appendChild(pct);
+
         // Per-dimension progress
-        if (data.dimension_progress) {
+        if (data && data.dimension_progress) {
             const dimHeader = document.createElement('h4');
             dimHeader.style.marginTop = '16px';
             Sanitize.setText(dimHeader, 'By Dimension');
             el.appendChild(dimHeader);
 
             for (const [dim, progress] of Object.entries(data.dimension_progress)) {
-                const dimEl = document.createElement('div');
-                dimEl.style.margin = '8px 0';
-                Sanitize.setText(dimEl, dim + ': ' + progress.answered + '/' + progress.total);
-                el.appendChild(dimEl);
-                el.appendChild(_createProgressBar(progress.answered / progress.total));
+                const dimRow = document.createElement('div');
+                dimRow.style.margin = '8px 0';
+
+                const dimLabel = document.createElement('div');
+                dimLabel.style.display = 'flex';
+                dimLabel.style.justifyContent = 'space-between';
+                dimLabel.style.marginBottom = '2px';
+
+                const nameEl = document.createElement('span');
+                Sanitize.setText(nameEl, dim);
+                dimLabel.appendChild(nameEl);
+
+                const countEl = document.createElement('span');
+                countEl.style.color = 'var(--color-text-muted)';
+                countEl.style.fontSize = '13px';
+                Sanitize.setText(countEl, progress.answered + '/' + progress.total);
+                dimLabel.appendChild(countEl);
+
+                dimRow.appendChild(dimLabel);
+
+                const dimBar = _createProgressBar(progress.total > 0 ? progress.answered / progress.total : 0);
+                dimRow.appendChild(dimBar);
+
+                el.appendChild(dimRow);
             }
+        } else if (!data) {
+            const hint = document.createElement('p');
+            hint.style.color = 'var(--color-text-muted)';
+            hint.style.marginTop = '12px';
+            Sanitize.setText(hint, 'Answer questions in the chat to see your progress here.');
+            el.appendChild(hint);
         }
     }
 
@@ -276,23 +331,33 @@ const Results = (() => {
         Sanitize.setText(header, 'Your Profile');
         el.appendChild(header);
 
-        if (data.quadrant) {
+        // Quadrant name — from SSE (data.quadrant string) or API (data.quadrant_placement.quadrant)
+        const quadrantName = typeof data.quadrant === 'string'
+            ? data.quadrant
+            : (data.quadrant_placement && data.quadrant_placement.quadrant)
+              ? data.quadrant_placement.quadrant
+              : null;
+
+        if (quadrantName) {
             const quad = document.createElement('div');
             quad.style.margin = '12px 0';
             quad.style.fontSize = '18px';
             quad.style.fontWeight = '600';
-            Sanitize.setText(quad, 'Quadrant: ' + data.quadrant);
+            Sanitize.setText(quad, 'Quadrant: ' + quadrantName);
             el.appendChild(quad);
         }
 
-        if (data.synopsis) {
+        // Interpretation text — from SSE (data.interpretation) or API (data.interpretation)
+        const interpretation = data.interpretation || data.synopsis;
+        if (interpretation) {
             const syn = document.createElement('p');
             syn.style.margin = '12px 0';
             syn.style.lineHeight = '1.6';
-            Sanitize.setText(syn, data.synopsis);
+            Sanitize.setText(syn, interpretation);
             el.appendChild(syn);
         }
 
+        // Spider chart image — from SSE (data.spider_data.image_base64)
         if (data.spider_data && data.spider_data.image_base64) {
             const img = document.createElement('img');
             img.src = 'data:image/png;base64,' + data.spider_data.image_base64;
@@ -302,11 +367,45 @@ const Results = (() => {
             el.appendChild(img);
         }
 
+        // Dimension scores breakdown
+        if (data.scores) {
+            const scoresHeader = document.createElement('h4');
+            scoresHeader.style.marginTop = '16px';
+            Sanitize.setText(scoresHeader, 'Dimension Scores');
+            el.appendChild(scoresHeader);
+
+            for (const [dim, dimData] of Object.entries(data.scores)) {
+                const row = document.createElement('div');
+                row.style.margin = '8px 0';
+
+                const label = document.createElement('div');
+                label.style.display = 'flex';
+                label.style.justifyContent = 'space-between';
+                label.style.marginBottom = '2px';
+
+                const nameEl = document.createElement('span');
+                Sanitize.setText(nameEl, dim);
+                label.appendChild(nameEl);
+
+                const score = typeof dimData === 'object' ? (dimData.weighted_avg || dimData.score || 0) : dimData;
+                const scoreEl = document.createElement('span');
+                scoreEl.style.color = 'var(--color-text-muted)';
+                scoreEl.style.fontSize = '13px';
+                Sanitize.setText(scoreEl, Math.round(score * 100) / 100 + '');
+                label.appendChild(scoreEl);
+
+                row.appendChild(label);
+                // Normalize score to 0-1 for bar (scores are typically 1-5)
+                row.appendChild(_createProgressBar(Math.min(score / 5, 1)));
+                el.appendChild(row);
+            }
+        }
+
         // Quadrant chart
         const chartContainer = document.createElement('div');
         el.appendChild(chartContainer);
         if (typeof QuadrantChart !== 'undefined') {
-            QuadrantChart.render(chartContainer, data.flow_data || null);
+            QuadrantChart.render(chartContainer, data.quadrant_placement || null, data.flow_data || null);
         }
     }
 
