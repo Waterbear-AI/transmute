@@ -1,8 +1,10 @@
 from google.adk.agents import LlmAgent
 
 from agents.transmutation.prompts.assessment_prompt import PROMPT
+from agents.transmutation.sub_agents.inject_user_id import with_user_id
 from agents.transmutation.tools import (
     get_assessment_state,
+    get_next_question_batch,
     present_question_batch,
     present_scenario,
     save_assessment_response,
@@ -24,10 +26,11 @@ def create_assessment_agent(model: str = "") -> LlmAgent:
     return LlmAgent(
         name="assessment_agent",
         description=DESCRIPTION,
-        instruction=PROMPT,
+        instruction=with_user_id(PROMPT),
         model=model,
         tools=[
             get_assessment_state,
+            get_next_question_batch,
             present_question_batch,
             present_scenario,
             save_assessment_response,

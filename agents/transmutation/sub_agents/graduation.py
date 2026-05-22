@@ -1,6 +1,7 @@
 from google.adk.agents import LlmAgent
 
 from agents.transmutation.prompts.graduation_prompt import PROMPT
+from agents.transmutation.sub_agents.inject_user_id import with_user_id
 from agents.transmutation.tools import (
     get_user_profile,
     get_longitudinal_snapshots,
@@ -25,7 +26,7 @@ def create_graduation_agent(model: str = "") -> LlmAgent:
     return LlmAgent(
         name="graduation_agent",
         description=DESCRIPTION,
-        instruction=PROMPT,
+        instruction=with_user_id(PROMPT),
         model=model,
         tools=[
             get_user_profile,

@@ -6,6 +6,7 @@ ADK's built-in agent transfer uses sub-agent descriptions for routing.
 """
 
 from google.adk.agents import LlmAgent
+from google.adk.agents.readonly_context import ReadonlyContext
 
 from agents.transmutation.prompts.shared.safety import PROMPT as SAFETY
 from agents.transmutation.prompts.shared.boundary import PROMPT as BOUNDARY
@@ -25,8 +26,7 @@ from agents.transmutation.tools import (
     flag_safety_concern,
 )
 
-ROOT_INSTRUCTION = "\n\n".join([
-    """## Transmutation Engine — Root Agent
+_ROOT_INSTRUCTION_TEMPLATE = """## Transmutation Engine — Root Agent
 
 You are the Transmutation Engine, a conversational guide that helps users understand their transmutation patterns — how they handle deprivation and fulfillment in their lives.
 
@@ -42,8 +42,12 @@ You manage the user's journey through phases. Check the user's `current_phase` t
 - **graduation**: Transfer to the Graduation Agent. It guides the closing sequence.
 - **graduated** / **check_in**: Transfer to the Check-in Agent for post-graduation assessment.
 
+**User identity:**
+The current user's ID is: `{user_id}`
+Always pass this exact value as the `user_id` parameter when calling any tool. NEVER ask the user for their user ID.
+
 **On first message in a new session:**
-1. Call `get_assessment_state()` to check if there's existing progress.
+1. Call `get_assessment_state(user_id="{user_id}")` to check if there's existing progress.
 2. If the user has a completed profile, offer to review it or start fresh.
 3. If the user has partial assessment data, offer to continue where they left off.
 4. If no data exists, begin orientation.
@@ -53,12 +57,14 @@ You manage the user's journey through phases. Check the user's `current_phase` t
 - Keep messages concise — under 3 paragraphs unless explaining results.
 - Never rush the user through phases.
 - If the user seems distressed, follow the safety protocol.
-""",
-    SAFETY,
-    BOUNDARY,
-    ORIENTATION,
-    TRANSMUTATION,
-])
+"""
+
+_STATIC_SECTIONS = "\n\n".join([SAFETY, BOUNDARY, ORIENTATION, TRANSMUTATION])
+
+
+def _root_instruction(ctx: ReadonlyContext) -> str:
+    user_id = ctx.state.get("user_id", "unknown")
+    return _ROOT_INSTRUCTION_TEMPLATE.format(user_id=user_id) + "\n\n" + _STATIC_SECTIONS
 
 
 def create_transmutation_agent(model: str = "") -> LlmAgent:
@@ -79,7 +85,7 @@ def create_transmutation_agent(model: str = "") -> LlmAgent:
     return LlmAgent(
         name="transmutation_engine",
         description="Root orchestrator for the Transmutation Engine. Routes users through the full lifecycle: orientation, assessment, profile, education, development, reassessment, graduation, and check-in.",
-        instruction=ROOT_INSTRUCTION,
+        instruction=_root_instruction,
         model=model,
         tools=[
             get_assessment_state,
