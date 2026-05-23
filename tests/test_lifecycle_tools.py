@@ -37,13 +37,18 @@ def _create_user(user_id: str = None, phase: str = "education") -> str:
 
 
 def _create_snapshot(user_id: str, scores: dict, quadrant: str = "absorber", created_at: str = None) -> str:
-    """Helper: insert a profile snapshot and return snapshot_id."""
+    """Helper: insert a profile snapshot and return snapshot_id.
+
+    Stores quadrant_placement under the ``archetype`` key to match production
+    (scoring_engine._calculate_quadrant emits ``archetype``, never ``quadrant``).
+    Scores are on the engine's raw 1–5 Likert scale.
+    """
     sid = str(uuid.uuid4())
     ts = created_at or datetime.utcnow().isoformat()
     with get_db_session() as conn:
         conn.execute(
             "INSERT INTO profile_snapshots (id, user_id, scores, quadrant_placement, created_at) VALUES (?, ?, ?, ?, ?)",
-            (sid, user_id, json.dumps(scores), json.dumps({"quadrant": quadrant}), ts),
+            (sid, user_id, json.dumps(scores), json.dumps({"archetype": quadrant}), ts),
         )
     return sid
 
@@ -243,15 +248,15 @@ class TestEvaluateGraduationReadiness:
 
     def test_insufficient_snapshots(self):
         uid = _create_user(phase="reassessment")
-        _create_snapshot(uid, {"dim1": {"score": 50}}, "absorber")
+        _create_snapshot(uid, {"dim1": {"score": 3.0}}, "absorber")
         result = evaluate_graduation_readiness(uid)
         assert result["graduation_ready"] is False
         assert result["indicators_met"] == 0
 
     def test_pattern_stability_met(self):
         uid = _create_user(phase="reassessment")
-        # 3 snapshots with <5% delta across all cycles
-        scores = {"dim1": {"score": 50}, "dim2": {"score": 70}}
+        # 3 identical snapshots → 0-pt normalized delta across all cycles (stable)
+        scores = {"dim1": {"score": 3.0}, "dim2": {"score": 4.0}}
         self._setup_snapshots(uid, [scores, scores, scores], ["absorber", "absorber", "absorber"])
 
         result = evaluate_graduation_readiness(uid)
@@ -259,17 +264,38 @@ class TestEvaluateGraduationReadiness:
 
     def test_pattern_stability_not_met(self):
         uid = _create_user(phase="reassessment")
-        s1 = {"dim1": {"score": 50}}
-        s2 = {"dim1": {"score": 60}}  # 10% delta
-        s3 = {"dim1": {"score": 70}}
+        # Raw 0.5/cycle on the 1–5 scale = 12.5 normalized pts/cycle (> 5) → not stable
+        s1 = {"dim1": {"score": 2.0}}
+        s2 = {"dim1": {"score": 2.5}}
+        s3 = {"dim1": {"score": 3.0}}
         self._setup_snapshots(uid, [s3, s2, s1], ["absorber", "absorber", "absorber"])
 
         result = evaluate_graduation_readiness(uid)
         assert result["indicators"]["pattern_stability"]["met"] is False
 
+    def test_pattern_stability_not_trivially_true_on_1_5_scale(self):
+        """Regression guard for the original scale bug.
+
+        On raw 1–5 data with a 1.0/cycle move (2.0→3.0→4.0), the old
+        ``delta < 5`` raw check would have wrongly reported stability (1.0 < 5).
+        Normalized, each cycle moved 25 pts (> 5), so stability must be False.
+        """
+        uid = _create_user(phase="reassessment")
+        s_oldest = {"dim1": {"score": 2.0}}
+        s_mid = {"dim1": {"score": 3.0}}
+        s_newest = {"dim1": {"score": 4.0}}
+        self._setup_snapshots(
+            uid, [s_newest, s_mid, s_oldest], ["transmuter", "transmuter", "transmuter"]
+        )
+
+        result = evaluate_graduation_readiness(uid)
+        assert result["indicators"]["pattern_stability"]["met"] is False
+        evidence = result["indicators"]["pattern_stability"]["evidence"]
+        assert "normalized" in evidence and "%" not in evidence
+
     def test_quadrant_consolidation_met(self):
         uid = _create_user(phase="reassessment")
-        scores = {"dim1": {"score": 50}}
+        scores = {"dim1": {"score": 3.0}}
         self._setup_snapshots(uid, [scores, scores, scores], ["transmuter", "transmuter", "transmuter"])
 
         result = evaluate_graduation_readiness(uid)
@@ -277,7 +303,7 @@ class TestEvaluateGraduationReadiness:
 
     def test_quadrant_consolidation_not_met(self):
         uid = _create_user(phase="reassessment")
-        scores = {"dim1": {"score": 50}}
+        scores = {"dim1": {"score": 3.0}}
         self._setup_snapshots(uid, [scores, scores, scores], ["transmuter", "absorber", "transmuter"])
 
         result = evaluate_graduation_readiness(uid)
@@ -286,7 +312,7 @@ class TestEvaluateGraduationReadiness:
     def test_two_of_three_triggers_graduation(self):
         uid = _create_user(phase="reassessment")
         # Pattern stability + quadrant consolidation both met
-        scores = {"dim1": {"score": 50}}
+        scores = {"dim1": {"score": 3.0}}
         self._setup_snapshots(uid, [scores, scores, scores], ["transmuter", "transmuter", "transmuter"])
 
         result = evaluate_graduation_readiness(uid)
@@ -297,14 +323,19 @@ class TestEvaluateGraduationReadiness:
 class TestGenerateComparisonSnapshot:
     def test_computes_deltas(self):
         uid = _create_user(phase="reassessment")
-        prev_id = _create_snapshot(uid, {"dim1": {"score": 40}}, "absorber",
+        prev_id = _create_snapshot(uid, {"dim1": {"score": 2.0}}, "absorber",
                                    (datetime.utcnow() - timedelta(days=30)).isoformat())
-        _create_snapshot(uid, {"dim1": {"score": 55}}, "transmuter")
+        _create_snapshot(uid, {"dim1": {"score": 3.0}}, "transmuter")
 
         result = generate_comparison_snapshot(uid, prev_id)
-        assert result["deltas"]["dim1"]["delta"] == 15
-        assert result["deltas"]["dim1"]["direction"] == "up"
+        d = result["deltas"]["dim1"]
+        assert d["delta"] == 1.0                 # raw 1–5 delta
+        assert d["delta_normalized"] == 25.0     # 0–100 scale
+        assert d["previous_normalized"] == 25.0
+        assert d["current_normalized"] == 50.0
+        assert d["direction"] == "up"
         assert result["quadrant_shift"]["shifted"] is True
+        assert result["quadrant_shift"]["current"] == "transmuter"
 
     def test_missing_snapshot_returns_error(self):
         uid = _create_user()
@@ -318,16 +349,17 @@ class TestGenerateComparisonSnapshot:
 class TestGenerateGraduationArtifacts:
     def test_produces_growth_trajectory(self):
         uid = _create_user(phase="graduation")
-        _create_snapshot(uid, {"dim1": {"score": 30}}, "absorber",
+        _create_snapshot(uid, {"dim1": {"score": 2.0}}, "absorber",
                          (datetime.utcnow() - timedelta(days=90)).isoformat())
-        _create_snapshot(uid, {"dim1": {"score": 65}}, "transmuter")
+        _create_snapshot(uid, {"dim1": {"score": 4.0}}, "transmuter")
         # Need 3 snapshots for evaluate_graduation_readiness
-        _create_snapshot(uid, {"dim1": {"score": 64}}, "transmuter",
+        _create_snapshot(uid, {"dim1": {"score": 3.9}}, "transmuter",
                          (datetime.utcnow() - timedelta(days=1)).isoformat())
 
         result = generate_graduation_artifacts(uid)
         assert "growth_trajectory" in result
-        assert result["growth_trajectory"]["dim1"]["change"] == pytest.approx(35, abs=1)
+        # Newest (4.0) − oldest (2.0) on the raw 1–5 scale
+        assert result["growth_trajectory"]["dim1"]["change"] == pytest.approx(2.0, abs=0.1)
 
     def test_practice_map_grouped(self):
         uid = _create_user(phase="graduation")

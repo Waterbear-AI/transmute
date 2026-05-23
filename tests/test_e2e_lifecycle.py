@@ -47,13 +47,17 @@ def _create_user(phase: str = "orientation") -> str:
 
 
 def _create_profile_snapshot(user_id: str, scores: dict, quadrant: str = "absorber", created_at: str = None) -> str:
-    """Create a profile snapshot and return its ID."""
+    """Create a profile snapshot and return its ID.
+
+    Stores quadrant_placement under the ``archetype`` key (production shape) and
+    expects scores on the raw 1–5 Likert scale.
+    """
     sid = str(uuid.uuid4())
     ts = created_at or datetime.utcnow().isoformat()
     with get_db_session() as conn:
         conn.execute(
             "INSERT INTO profile_snapshots (id, user_id, scores, quadrant_placement, created_at) VALUES (?, ?, ?, ?, ?)",
-            (sid, user_id, json.dumps(scores), json.dumps({"quadrant": quadrant}), ts),
+            (sid, user_id, json.dumps(scores), json.dumps({"archetype": quadrant}), ts),
         )
     return sid
 
@@ -203,7 +207,7 @@ class TestReassessmentToGraduationJourney:
 
     def _setup_stable_snapshots(self, uid):
         """Create 3 snapshots with stable scores (pattern stability met)."""
-        scores = {"dim1": {"score": 65}, "dim2": {"score": 70}}
+        scores = {"dim1": {"score": 4.0}, "dim2": {"score": 4.5}}
         for i in range(3):
             ts = (datetime.utcnow() - timedelta(days=i)).isoformat()
             _create_profile_snapshot(uid, scores, "transmuter", ts)
@@ -222,9 +226,10 @@ class TestReassessmentToGraduationJourney:
     def test_graduation_not_ready_with_shifting_scores(self):
         """Large score changes → graduation not ready."""
         uid = _create_user(phase="reassessment")
-        s1 = {"dim1": {"score": 40}}
-        s2 = {"dim1": {"score": 55}}
-        s3 = {"dim1": {"score": 70}}
+        # 1.0/cycle on the 1–5 scale = 25 normalized pts/cycle (> 5) → not stable
+        s1 = {"dim1": {"score": 2.0}}
+        s2 = {"dim1": {"score": 3.0}}
+        s3 = {"dim1": {"score": 4.0}}
 
         for i, scores in enumerate([s3, s2, s1]):
             ts = (datetime.utcnow() - timedelta(days=i)).isoformat()
@@ -237,13 +242,14 @@ class TestReassessmentToGraduationJourney:
         """Comparison between two snapshots shows correct deltas."""
         uid = _create_user(phase="reassessment")
         prev_id = _create_profile_snapshot(
-            uid, {"dim1": {"score": 40}}, "absorber",
+            uid, {"dim1": {"score": 2.0}}, "absorber",
             (datetime.utcnow() - timedelta(days=30)).isoformat(),
         )
-        _create_profile_snapshot(uid, {"dim1": {"score": 60}}, "transmuter")
+        _create_profile_snapshot(uid, {"dim1": {"score": 4.0}}, "transmuter")
 
         result = generate_comparison_snapshot(uid, prev_id)
-        assert result["deltas"]["dim1"]["delta"] == 20
+        assert result["deltas"]["dim1"]["delta"] == 2.0            # raw 1–5 delta
+        assert result["deltas"]["dim1"]["delta_normalized"] == 50.0  # 0–100 scale
         assert result["deltas"]["dim1"]["direction"] == "up"
         assert result["quadrant_shift"]["shifted"] is True
 
@@ -283,9 +289,9 @@ class TestCheckInJourney:
     def test_check_in_without_regression(self):
         """Normal check-in: no regression detected."""
         uid = _create_user(phase="check_in")
-        snap_id = _create_profile_snapshot(uid, {"dim1": {"score": 70}}, "transmuter")
+        snap_id = _create_profile_snapshot(uid, {"dim1": {"score": 3.5}}, "transmuter")
         grad_snap_id = _create_profile_snapshot(
-            uid, {"dim1": {"score": 65}}, "transmuter",
+            uid, {"dim1": {"score": 4.0}}, "transmuter",
             (datetime.utcnow() - timedelta(days=90)).isoformat(),
         )
 
@@ -297,9 +303,9 @@ class TestCheckInJourney:
     def test_check_in_with_regression_and_reentry(self):
         """Regression detected: user offered re-entry to development."""
         uid = _create_user(phase="check_in")
-        snap_id = _create_profile_snapshot(uid, {"dim1": {"score": 40}}, "absorber")
+        snap_id = _create_profile_snapshot(uid, {"dim1": {"score": 2.0}}, "absorber")
         grad_snap_id = _create_profile_snapshot(
-            uid, {"dim1": {"score": 65}}, "transmuter",
+            uid, {"dim1": {"score": 4.0}}, "transmuter",
             (datetime.utcnow() - timedelta(days=90)).isoformat(),
         )
 
@@ -314,9 +320,9 @@ class TestCheckInJourney:
     def test_check_in_without_reentry(self):
         """Regression detected but user declines re-entry."""
         uid = _create_user(phase="check_in")
-        snap_id = _create_profile_snapshot(uid, {"dim1": {"score": 45}}, "absorber")
+        snap_id = _create_profile_snapshot(uid, {"dim1": {"score": 2.5}}, "absorber")
         grad_snap_id = _create_profile_snapshot(
-            uid, {"dim1": {"score": 65}}, "transmuter",
+            uid, {"dim1": {"score": 4.0}}, "transmuter",
             (datetime.utcnow() - timedelta(days=90)).isoformat(),
         )
 
@@ -372,7 +378,7 @@ class TestFullLifecycleJourney:
             conn.execute("UPDATE users SET current_phase = 'reassessment' WHERE id = ?", (uid,))
 
         # Create snapshots showing stability
-        scores = {"dim1": {"score": 65}, "dim2": {"score": 70}}
+        scores = {"dim1": {"score": 4.0}, "dim2": {"score": 4.5}}
         for i in range(3):
             ts = (datetime.utcnow() - timedelta(days=i)).isoformat()
             _create_profile_snapshot(uid, scores, "transmuter", ts)
@@ -434,7 +440,7 @@ class TestResultsAPIJourney:
         log_practice_entry(uid, "p1", "reflection", 7)
 
         # Seed profile snapshot
-        _create_profile_snapshot(uid, {"dim1": {"score": 50}}, "absorber")
+        _create_profile_snapshot(uid, {"dim1": {"score": 3.0}}, "absorber")
 
         # Fetch results
         resp = authenticated_client.get(f"/api/results/{uid}")
