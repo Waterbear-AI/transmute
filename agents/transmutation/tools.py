@@ -1958,6 +1958,148 @@ def save_check_in_log(
     }
 
 
+def detect_check_in_regression(user_id: str) -> dict[str, Any]:
+    """Deterministically decide whether a graduated user has regressed.
+
+    Compares the user's latest (check-in) profile snapshot against their
+    graduation baseline (graduation_record.final_snapshot_id). Mirrors the
+    sentinel/graduation normalized-0–100 math:
+      - a dimension regresses when its normalized score dropped by MORE than
+        CHECK_IN_REGRESSION_DROP_NORMALIZED points since graduation;
+      - the quadrant "downgrades" when the current archetype ranks below the
+        baseline archetype per ARCHETYPE_RANK.
+
+    Reads only — no writes, no SSE. The check-in agent NARRATES this verdict and
+    passes ``regression_detected`` to save_check_in_log; it does not decide
+    regression itself.
+
+    Returns the stable contract:
+        {
+          "regression_detected": bool,
+          "evaluated": bool,              # False when baseline/snapshot missing
+          "reason": str,
+          "threshold_normalized": float,
+          "regressed_dimensions": [
+            {"dimension": str, "baseline_normalized": float,
+             "current_normalized": float, "drop_normalized": float}
+          ],
+          "quadrant": {"baseline": str, "current": str, "downgraded": bool},
+          "baseline_snapshot_id": str | None,
+          "check_in_snapshot_id": str | None,
+        }
+    """
+    def _not_evaluated(reason: str, baseline_id=None, check_in_id=None) -> dict[str, Any]:
+        return {
+            "regression_detected": False,
+            "evaluated": False,
+            "reason": reason,
+            "threshold_normalized": CHECK_IN_REGRESSION_DROP_NORMALIZED,
+            "regressed_dimensions": [],
+            "quadrant": {"baseline": "", "current": "", "downgraded": False},
+            "baseline_snapshot_id": baseline_id,
+            "check_in_snapshot_id": check_in_id,
+        }
+
+    record = get_graduation_record(user_id)
+    if not record.get("exists"):
+        return _not_evaluated("No graduation record; check-in regression cannot be evaluated")
+    baseline_id = record.get("final_snapshot_id")
+    if not baseline_id:
+        return _not_evaluated("Graduation record has no final snapshot baseline")
+
+    with get_db_session() as conn:
+        baseline = conn.execute(
+            "SELECT id, scores, quadrant_placement FROM profile_snapshots WHERE id = ? AND user_id = ?",
+            (baseline_id, user_id),
+        ).fetchone()
+        current = conn.execute(
+            "SELECT id, scores, quadrant_placement FROM profile_snapshots WHERE user_id = ? ORDER BY created_at DESC LIMIT 1",
+            (user_id,),
+        ).fetchone()
+
+    if not baseline:
+        return _not_evaluated(f"Graduation baseline snapshot not found: {baseline_id}", baseline_id)
+    if not current:
+        return _not_evaluated("No check-in snapshot found", baseline_id)
+    if current["id"] == baseline_id:
+        # The graduation baseline is still the most recent snapshot — no
+        # check-in reassessment has been recorded yet. Don't compare a
+        # snapshot against itself.
+        return _not_evaluated("No check-in snapshot since graduation", baseline_id, current["id"])
+
+    check_in_id = current["id"]
+    baseline_scores = json.loads(baseline["scores"] or "{}")
+    current_scores = json.loads(current["scores"] or "{}")
+
+    # Per-dimension normalized drop over the INTERSECTION of dimensions present
+    # in both snapshots. A dimension missing on either side is skipped, never
+    # defaulted to 0 (which normalize_score maps to -25, manufacturing a drop).
+    regressed: list[dict[str, Any]] = []
+    for dim in set(baseline_scores.keys()) & set(current_scores.keys()):
+        b = baseline_scores[dim]
+        c = current_scores[dim]
+        b_score = b.get("score") if isinstance(b, dict) else b
+        c_score = c.get("score") if isinstance(c, dict) else c
+        if b_score is None or c_score is None:
+            continue
+        b_norm = normalize_score(b_score)
+        c_norm = normalize_score(c_score)
+        drop = b_norm - c_norm
+        if drop > CHECK_IN_REGRESSION_DROP_NORMALIZED:
+            regressed.append({
+                "dimension": dim,
+                "baseline_normalized": round(b_norm, 2),
+                "current_normalized": round(c_norm, 2),
+                "drop_normalized": round(drop, 2),
+            })
+    regressed.sort(key=lambda d: (-d["drop_normalized"], d["dimension"]))
+
+    # Quadrant downgrade: current archetype ranks below the baseline archetype.
+    # Archetypes absent from ARCHETYPE_RANK (e.g. "undetermined"/"") yield no
+    # rank → quadrant signal is skipped, never counted as a downgrade.
+    baseline_arch = _snapshot_archetype(json.loads(baseline["quadrant_placement"] or "{}"))
+    current_arch = _snapshot_archetype(json.loads(current["quadrant_placement"] or "{}"))
+    b_rank = ARCHETYPE_RANK.get(baseline_arch)
+    c_rank = ARCHETYPE_RANK.get(current_arch)
+    quadrant_downgraded = b_rank is not None and c_rank is not None and c_rank < b_rank
+
+    regression_detected = bool(regressed) or quadrant_downgraded
+
+    if regression_detected:
+        parts = []
+        if regressed:
+            parts.append(
+                f"{len(regressed)} dimension(s) dropped > {CHECK_IN_REGRESSION_DROP_NORMALIZED} pts on the 0–100 scale ("
+                + ", ".join(f"{r['dimension']} −{r['drop_normalized']}" for r in regressed)
+                + ")"
+            )
+        if quadrant_downgraded:
+            parts.append(f"quadrant downgraded ({baseline_arch} → {current_arch})")
+        reason = "Regression detected: " + "; ".join(parts)
+        logger.warning(
+            "Check-in regression detected for user %s: regressed_dims=%d, "
+            "quadrant %s->%s (downgraded=%s)",
+            user_id, len(regressed), baseline_arch, current_arch, quadrant_downgraded,
+        )
+    else:
+        reason = "No regression detected: all dimensions within threshold and no quadrant downgrade"
+
+    return {
+        "regression_detected": regression_detected,
+        "evaluated": True,
+        "reason": reason,
+        "threshold_normalized": CHECK_IN_REGRESSION_DROP_NORMALIZED,
+        "regressed_dimensions": regressed,
+        "quadrant": {
+            "baseline": baseline_arch,
+            "current": current_arch,
+            "downgraded": quadrant_downgraded,
+        },
+        "baseline_snapshot_id": baseline_id,
+        "check_in_snapshot_id": check_in_id,
+    }
+
+
 # ── Reassessment selection tools ───────────────────────────────────────
 
 
