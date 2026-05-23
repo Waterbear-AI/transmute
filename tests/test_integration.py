@@ -288,9 +288,9 @@ class TestMigrations:
         conn.close()
         expected = [
             "adk_sessions", "assessment_state", "check_in_log",
-            "development_roadmap", "education_progress", "graduation_record",
-            "moral_ledger", "practice_journal", "profile_snapshots", "safety_log",
-            "schema_version", "users",
+            "development_roadmap", "dimension_assessment_state", "education_progress",
+            "graduation_record", "moral_ledger", "practice_journal", "profile_snapshots",
+            "safety_log", "schema_version", "users",
         ]
         assert tables == expected
         assert "events_json" in cols

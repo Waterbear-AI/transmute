@@ -105,8 +105,8 @@ class TestMigrationRunner:
             db_path = f.name
         try:
             count = run_migrations(db_path=db_path)
-            # 001_initial, 002_flow_tracking, 003_session_events
-            assert count == 3
+            # 001_initial, 002_flow_tracking, 003_session_events, 004_sentinel_tracking
+            assert count == 4
 
             import sqlite3
             conn = sqlite3.connect(db_path)
@@ -128,7 +128,8 @@ class TestMigrationRunner:
             assert "schema_version" in tables
             assert "moral_ledger" in tables
             assert "events_json" in cols
-            assert len(tables) == 12
+            assert "dimension_assessment_state" in tables
+            assert len(tables) == 13
         finally:
             os.unlink(db_path)
 
@@ -183,7 +184,7 @@ class TestMigrationRunner:
         try:
             # Apply only migrations 001 and 002 first
             count = run_migrations(db_path=db_path)
-            assert count == 3  # All three applied fresh
+            assert count == 4  # All four applied fresh
 
             # Simulate a DB that only has versions 1 and 2 by removing version 3
             conn = _sqlite3.connect(db_path)
