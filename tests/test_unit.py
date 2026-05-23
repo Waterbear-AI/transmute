@@ -307,6 +307,79 @@ class TestWithUserId:
             raise
 
 
+# --- Reassessment Prompt & Toolset Tests ---
+
+class TestReassessmentPromptDelegation:
+    """Verify the reassessment prompt delegates math/selection to tools and the
+    agent toolset wires the new deterministic tools (BE-005)."""
+
+    def test_prompt_has_no_arithmetic_or_selection_instructions(self):
+        """The prompt must not instruct the LLM to do the deterministic math."""
+        from agents.transmutation.prompts.reassessment_prompt import REASSESSMENT_INSTRUCTIONS
+        text = REASSESSMENT_INSTRUCTIONS.lower()
+        # These phrasings encoded math/selection the LLM used to perform.
+        banned = [
+            "70% prior",
+            "30% new",
+            ">15 point shift",
+            "force-include at 3 cycles",
+            "more than 2 cycles",
+            "weighted blend",
+        ]
+        for phrase in banned:
+            assert phrase.lower() not in text, (
+                f"Prompt still contains delegated-math instruction: {phrase!r}"
+            )
+
+    def test_prompt_directs_agent_to_new_tools(self):
+        """The prompt must direct the agent to call the new deterministic tools."""
+        from agents.transmutation.prompts.reassessment_prompt import REASSESSMENT_INSTRUCTIONS
+        for tool_name in (
+            "select_reassessment_targets",
+            "select_sentinel_questions",
+            "generate_reassessment_snapshot",
+        ):
+            assert tool_name in REASSESSMENT_INSTRUCTIONS, (
+                f"Prompt does not direct the agent to call {tool_name}"
+            )
+
+    def test_agent_toolset_includes_new_tools(self):
+        """create_reassessment_agent must expose all four new tools."""
+        from agents.transmutation.sub_agents.reassessment import create_reassessment_agent
+        agent = create_reassessment_agent()
+        tool_names = {
+            getattr(t, "__name__", getattr(t, "name", None))
+            for t in agent.tools
+        }
+        for expected in (
+            "select_reassessment_targets",
+            "select_sentinel_questions",
+            "generate_reassessment_snapshot",
+            "get_dimension_staleness",
+        ):
+            assert expected in tool_names, (
+                f"Reassessment agent toolset missing {expected}"
+            )
+
+    def test_agent_retains_existing_tools(self):
+        """Wiring new tools must not drop the existing reassessment tools."""
+        from agents.transmutation.sub_agents.reassessment import create_reassessment_agent
+        agent = create_reassessment_agent()
+        tool_names = {
+            getattr(t, "__name__", getattr(t, "name", None))
+            for t in agent.tools
+        }
+        for expected in (
+            "save_profile_snapshot",
+            "generate_comparison_snapshot",
+            "present_question_batch",
+            "save_assessment_response",
+        ):
+            assert expected in tool_names, (
+                f"Reassessment agent toolset lost existing tool {expected}"
+            )
+
+
 # --- Chat Debug Instrumentation Tests ---
 
 class TestChatDebugInstrumentation:

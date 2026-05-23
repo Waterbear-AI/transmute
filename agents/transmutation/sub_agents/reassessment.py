@@ -14,6 +14,10 @@ from agents.transmutation.tools import (
     evaluate_graduation_readiness,
     advance_phase,
     flag_safety_concern,
+    select_reassessment_targets,
+    select_sentinel_questions,
+    generate_reassessment_snapshot,
+    get_dimension_staleness,
 )
 
 DESCRIPTION = (
@@ -43,5 +47,9 @@ def create_reassessment_agent(model: str = "") -> LlmAgent:
             evaluate_graduation_readiness,
             advance_phase,
             flag_safety_concern,
+            select_reassessment_targets,
+            select_sentinel_questions,
+            generate_reassessment_snapshot,
+            get_dimension_staleness,
         ],
     )
