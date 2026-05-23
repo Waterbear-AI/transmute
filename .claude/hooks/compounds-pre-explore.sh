@@ -2,10 +2,9 @@
 # compounds-hooks v7 — installed by 'compounds init-hooks'
 # Do not edit manually — re-run 'compounds init-hooks' to update
 
-# Gate Glob/Grep/Agent until the agent has called plan_change() or compounds search.
-# Read is always allowed — reading a specific known file is fine.
-#
-# Unlocks when compounds_searched OR plan_change_called marker exists.
+# Advisory only — never blocks. Read/Glob/Grep/Agent are all allowed; each emits
+# a hint recommending the Compounds CLI for broader codebase exploration, in
+# addition to using Grep/Glob directly.
 #
 # Fail-open (ADR-3): any error exits 0 with advisory context.
 
@@ -39,24 +38,6 @@ if [ "$TOOL_NAME" = "Agent" ]; then
     exit 0
 fi
 
-COMPOUNDS_DIR=".compounds/workflows"
-
-# If .compounds/workflows doesn't exist, block with specific message
-if [ ! -d "$COMPOUNDS_DIR" ]; then
-    echo '{"decision": "block", "reason": "Run `compounds search`/`compounds query` first for codebase exploration (help: `compounds agent-prompt cli-usage`), or call plan_change() for code-change routing. Either unlocks Glob/Grep/Agent/Read for follow-up reads."}'
-    exit 0
-fi
-
-# Check for unlock markers: compounds_searched (written by compounds search) OR
-# plan_change_called (written by PostToolUse after plan_change() MCP call)
-UNLOCKED=$(find "$COMPOUNDS_DIR" \( -name "compounds_searched" -o -name "plan_change_called" \) -print -quit 2>/dev/null)
-
-if [ -n "$UNLOCKED" ]; then
-    # Compounds workflow entry point was used — allow exploration
-    echo '{"additionalContext": "Compounds workflow entry called. You may read specific files identified by search results."}'
-    exit 0
-fi
-
-# No unlock marker — block Glob/Grep/Agent and direct to plan_change()
-echo '{"decision": "block", "reason": "Use the Compounds CLI for codebase exploration — `compounds query`/`compounds search` (help: `compounds agent-prompt cli-usage`). For code changes, also call plan_change() via Compounds MCP to route through the workflow. Either unlocks Glob/Grep/Agent/Read/Bash-grep for follow-up reads."}'
+# Any other tool (Glob/Grep): always allowed. Recommend the Compounds CLI too.
+echo '{"additionalContext": "Grep/Glob is allowed here. For broader codebase exploration, also consider the Compounds CLI — `compounds query` for named symbols or `compounds search` for concepts (help: `compounds agent-prompt cli-usage`). It is often faster and more precise than scanning files."}'
 exit 0
