@@ -4,9 +4,9 @@ services:
     ports:
       - "54718:54718"
     volumes:
-      - db-data:/app/data
+      - db-data:/var/lib/transmute
     environment:
-      - DB_PATH=/app/data/transmute.db
+      - DB_PATH=/var/lib/transmute/transmute.db
     env_file:
       - .env
     restart: unless-stopped
