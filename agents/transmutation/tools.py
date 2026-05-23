@@ -41,6 +41,54 @@ ALLOWED_TRANSITIONS = {
 }
 
 
+# ── Exit-gate thresholds (normalized 0–100 scale) ──────────────────────
+# These thresholds are compared against scores mapped to 0–100 via
+# scoring_engine.normalize_score(score, lo=1.0, hi=5.0). The underlying
+# engine still emits raw 1–5 Likert scores; only the threshold *comparisons*
+# are normalized, mirroring sentinel_engine's shift convention.
+
+# Max per-dimension movement (in 0–100 points) between two reassessment
+# cycles for the pair to count as "stable" for graduation. Re-expresses the
+# original "< 5%" intent on the normalized scale; ≈ 0.2 on the raw 1–5 scale.
+GRADUATION_STABILITY_MAX_NORMALIZED = 5.0
+
+# Per-dimension drop (in 0–100 points) since the graduation baseline that
+# counts as regression at check-in. Mirrors sentinel_engine's
+# shift_threshold_normalized (15.0, the "significant shift" magnitude);
+# ≈ 0.6 on the raw 1–5 scale.
+CHECK_IN_REGRESSION_DROP_NORMALIZED = 15.0
+
+# Developmental ordering of the v13 archetypes, used to detect a quadrant
+# "downgrade" at check-in (a lower rank than the graduation baseline).
+# Grounded in scoring_engine._map_archetype: transmuter (+amplification,
+# +filtering) is the apex; extractor (−,−) the floor; absorber (−,+) and
+# magnifier (+,−) are one-sided (tied); conduit (center/balanced) sits
+# between the one-sided pair and the apex (see spec PD-1). Archetypes absent
+# from this map (e.g. "undetermined") have no rank and are treated as "no
+# quadrant signal", never as a downgrade.
+ARCHETYPE_RANK = {
+    "extractor": 0,
+    "magnifier": 1,
+    "absorber": 1,
+    "conduit": 2,
+    "transmuter": 3,
+}
+
+
+def _snapshot_archetype(placement: dict) -> str:
+    """Read the archetype from a stored quadrant_placement dict.
+
+    Production snapshots persist the scoring_engine._calculate_quadrant output,
+    which carries an ``"archetype"`` key (never ``"quadrant"``). This accessor
+    reads ``"archetype"`` first, falls back to a legacy/test ``"quadrant"`` key,
+    and returns ``""`` when neither is present — the single source of truth for
+    reading an archetype off a snapshot.
+    """
+    if not isinstance(placement, dict):
+        return ""
+    return placement.get("archetype") or placement.get("quadrant") or ""
+
+
 def get_assessment_state(user_id: str) -> dict[str, Any]:
     """Retrieve current assessment progress for a user.
 
