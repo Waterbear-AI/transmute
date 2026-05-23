@@ -27,7 +27,12 @@ from agents.transmutation.tools import (
     save_check_in_log,
     advance_phase,
     get_user_profile,
+    get_dimension_staleness,
+    select_reassessment_targets,
+    generate_reassessment_snapshot,
+    save_profile_snapshot,
 )
+from agents.transmutation.question_bank import get_question_bank
 
 
 def _create_user(phase: str = "orientation") -> str:
@@ -441,3 +446,171 @@ class TestResultsAPIJourney:
         assert data["development"]["has_roadmap"] is True
         assert data["development"]["practice_count"] == 1
         assert len(data["profiles"]) >= 1
+
+
+# ── Deterministic Sentinel Reassessment Journey ──────────────────────────────
+
+
+def _full_responses(score: int = 3) -> dict:
+    """Answer every question in the bank with the given Likert score."""
+    qb = get_question_bank()
+    return {
+        q["id"]: {"score": score}
+        for dim in qb.get_dimensions()
+        for q in qb.get_questions_by_dimension(dim)
+    }
+
+
+def _baseline_scores(score: float = 3.0) -> dict:
+    """Build a baseline snapshot scores dict for all dims/sub-dims."""
+    qb = get_question_bank()
+    scores = {}
+    for dim in qb.get_dimensions():
+        sub_dims = {}
+        for q in qb.get_questions_by_dimension(dim):
+            sd = q.get("sub_dimension", "general")
+            sub_dims[sd] = {"score": score, "answered": 1, "total": 1, "na_count": 0}
+        scores[dim] = {
+            "score": score,
+            "answered": 1,
+            "total": 1,
+            "na_count": 0,
+            "insufficient_data": False,
+            "sub_dimensions": sub_dims,
+        }
+    return scores
+
+
+def _seed_assessment_state(user_id: str, responses: dict) -> None:
+    with get_db_session() as conn:
+        conn.execute(
+            "INSERT INTO assessment_state (id, user_id, responses, scenario_responses, current_phase, created_at) "
+            "VALUES (?, ?, ?, ?, ?, ?)",
+            (str(uuid.uuid4()), user_id, json.dumps(responses), "{}", "reassessment",
+             datetime.utcnow().isoformat()),
+        )
+
+
+def _das_map(user_id: str) -> dict:
+    with get_db_session() as conn:
+        rows = conn.execute(
+            "SELECT dimension, last_assessed_cycle, last_assessment_kind, last_score, "
+            "flagged_for_full_reassessment FROM dimension_assessment_state WHERE user_id = ?",
+            (user_id,),
+        ).fetchall()
+    return {r["dimension"]: dict(r) for r in rows}
+
+
+def _reassessment_cycle(user_id: str) -> int:
+    with get_db_session() as conn:
+        row = conn.execute("SELECT reassessment_cycle FROM users WHERE id = ?", (user_id,)).fetchone()
+    return row["reassessment_cycle"]
+
+
+class TestDeterministicReassessmentJourney:
+    """End-to-end deterministic reassessment: baseline → blended snapshot → next cycle.
+
+    Exercises the full tool chain (select_reassessment_targets →
+    generate_reassessment_snapshot → save_profile_snapshot) and asserts the
+    persistence invariants: cycle increment, dimension_assessment_state upserts,
+    blended scores, shift flagging, and staleness progression across cycles.
+    """
+
+    def test_baseline_then_first_reassessment_cycle(self):
+        qb = get_question_bank()
+        uid = _create_user(phase="reassessment")
+
+        # Baseline: prior snapshot + seed DAS at cycle 0 via the baseline save path.
+        _create_profile_snapshot(uid, _baseline_scores(3.0))
+        # Simulate the baseline DAS seeding that save_profile_snapshot would do.
+        for dim in qb.get_dimensions():
+            with get_db_session() as conn:
+                conn.execute(
+                    "INSERT INTO dimension_assessment_state (id, user_id, dimension, last_assessed_cycle, "
+                    "last_assessment_kind, last_score, flagged_for_full_reassessment, updated_at) "
+                    "VALUES (?, ?, ?, 0, 'baseline', 3.0, 0, ?)",
+                    (str(uuid.uuid4()), uid, dim, datetime.utcnow().isoformat()),
+                )
+
+        # Fresh reassessment responses (all high) drive a blend.
+        _seed_assessment_state(uid, _full_responses(5))
+
+        snap = generate_reassessment_snapshot(uid)
+        assert snap["event_type"] == "reassessment.scored"
+        assert snap["current_cycle"] == 1
+        # Partition is exhaustive.
+        sentinel = snap["sentinel"]
+        covered = set(sentinel["targeted_dimensions"]) | set(sentinel["sentinel_dimensions"]) | set(sentinel["carried_dimensions"])
+        assert covered == set(qb.get_dimensions())
+
+        # Persist and verify invariants.
+        save_result = save_profile_snapshot(uid, "First reassessment narrative.")
+        assert save_result["saved"] is True
+
+        assert _reassessment_cycle(uid) == 1
+        das = _das_map(uid)
+        for dim in sentinel["sentinel_dimensions"]:
+            assert das[dim]["last_assessed_cycle"] == 1
+            assert das[dim]["last_assessment_kind"] == "sentinel"
+        for dim in sentinel["targeted_dimensions"]:
+            assert das[dim]["last_assessed_cycle"] == 1
+        # Carried dims keep their cycle-0 record (untouched this cycle).
+        for dim in sentinel["carried_dimensions"]:
+            assert das[dim]["last_assessed_cycle"] == 0
+
+    def test_staleness_progresses_across_cycles(self):
+        qb = get_question_bank()
+        uid = _create_user(phase="reassessment")
+        _create_profile_snapshot(uid, _baseline_scores(3.0))
+        for dim in qb.get_dimensions():
+            with get_db_session() as conn:
+                conn.execute(
+                    "INSERT INTO dimension_assessment_state (id, user_id, dimension, last_assessed_cycle, "
+                    "last_assessment_kind, last_score, flagged_for_full_reassessment, updated_at) "
+                    "VALUES (?, ?, ?, 0, 'baseline', 3.0, 0, ?)",
+                    (str(uuid.uuid4()), uid, dim, datetime.utcnow().isoformat()),
+                )
+
+        # Cycle 1
+        _seed_assessment_state(uid, _full_responses(4))
+        generate_reassessment_snapshot(uid)
+        save_profile_snapshot(uid, "cycle 1")
+        assert _reassessment_cycle(uid) == 1
+
+        # Carried dims from cycle 1 are now 1 cycle stale.
+        staleness = get_dimension_staleness(uid)
+        assert staleness["current_cycle"] == 1
+        # At least one carried dim should show staleness == 1.
+        assert any(v == 1 for v in staleness["staleness"].values())
+
+    def test_large_shift_flags_dimension_for_full_reassessment(self):
+        qb = get_question_bank()
+        uid = _create_user(phase="reassessment")
+        # Prior at the floor, fresh at the ceiling → maximum normalized shift.
+        _create_profile_snapshot(uid, _baseline_scores(1.0))
+        for dim in qb.get_dimensions():
+            with get_db_session() as conn:
+                conn.execute(
+                    "INSERT INTO dimension_assessment_state (id, user_id, dimension, last_assessed_cycle, "
+                    "last_assessment_kind, last_score, flagged_for_full_reassessment, updated_at) "
+                    "VALUES (?, ?, ?, 0, 'baseline', 1.0, 0, ?)",
+                    (str(uuid.uuid4()), uid, dim, datetime.utcnow().isoformat()),
+                )
+        _seed_assessment_state(uid, _full_responses(5))
+
+        snap = generate_reassessment_snapshot(uid)
+        flagged = snap["sentinel"]["flagged_for_full_reassessment"]
+        # The huge swing on sentinel dims should flag at least one.
+        assert len(flagged) >= 1
+
+        save_profile_snapshot(uid, "flagging cycle")
+        das = _das_map(uid)
+        for dim in flagged:
+            assert das[dim]["flagged_for_full_reassessment"] == 1
+
+    def test_reassessment_without_prior_snapshot_errors(self):
+        uid = _create_user(phase="reassessment")
+        _seed_assessment_state(uid, _full_responses(3))
+        result = generate_reassessment_snapshot(uid)
+        assert "error" in result
+        assert _reassessment_cycle(uid) == 0  # no cycle increment on error
