@@ -85,6 +85,24 @@ class QuestionBank:
         self._ensure_loaded()
         return sorted(self._questions_by_dimension.keys())
 
+    def get_sub_dimensions(self, dimension: str) -> list[str]:
+        """Return distinct sub_dimension values for a given dimension.
+
+        Derived from indexed questions. Returns [] for an unknown dimension.
+        """
+        self._ensure_loaded()
+        questions = self._questions_by_dimension.get(dimension)
+        if questions is None:
+            return []
+        seen: set[str] = set()
+        result: list[str] = []
+        for q in questions:
+            sub = q.get("sub_dimension")
+            if sub and sub not in seen:
+                seen.add(sub)
+                result.append(sub)
+        return sorted(result)
+
     def get_full_data(self) -> dict[str, Any]:
         """Return the full question bank JSON (for GET /api/assessment/questions)."""
         self._ensure_loaded()
