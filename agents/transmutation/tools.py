@@ -13,6 +13,11 @@ from agents.transmutation.scoring_engine import (
     _calculate_quadrant,
 )
 from agents.transmutation.spider_chart import generate_spider_chart
+from agents.transmutation.leverage_engine import (
+    rank_transmutation_gaps,
+    validate_practice_linkage,
+    TRANSMUTATION_OPERATIONS,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -1091,16 +1096,49 @@ def get_development_roadmap(user_id: str) -> dict[str, Any]:
     }
 
 
-def generate_roadmap(user_id: str) -> dict[str, Any]:
-    """Generate a development roadmap from the user's profile.
+def rank_gaps(user_id: str, top_n: int = 3) -> dict[str, Any]:
+    """Return the top-N transmutation gaps ranked by leverage for a user.
 
-    Fetches the most recent profile snapshot, identifies weakest
-    transmutation linkages, and returns roadmap data for the LLM
-    to refine before saving.
+    Loads the latest profile snapshot scores and ranks gaps using the
+    deterministic leverage formula (axis-aware). The LLM must NOT compute
+    ranking itself — this tool is the source of truth (business-logic-protection).
+
+    Args:
+        user_id: The user whose gaps to rank.
+        top_n:   Number of top gaps to return (default 3).
+
+    Returns:
+        {"ranked_targets": [...], "source_snapshot_id": str}
+        or {"error": "No profile snapshot found"} if no snapshot exists.
     """
     with get_db_session() as conn:
         row = conn.execute(
-            "SELECT scores FROM profile_snapshots WHERE user_id = ? ORDER BY created_at DESC LIMIT 1",
+            "SELECT id, scores FROM profile_snapshots WHERE user_id = ? ORDER BY created_at DESC LIMIT 1",
+            (user_id,),
+        ).fetchone()
+
+    if not row:
+        return {"error": "No profile snapshot found"}
+
+    scores = json.loads(row["scores"] or "{}")
+    ranked = rank_transmutation_gaps(scores, top_n=top_n)
+
+    return {
+        "ranked_targets": ranked,
+        "source_snapshot_id": row["id"],
+    }
+
+
+def generate_roadmap(user_id: str) -> dict[str, Any]:
+    """Generate a development roadmap from the user's profile.
+
+    Fetches the most recent profile snapshot and returns the top-N leverage
+    targets from the deterministic ranking. The LLM authors narrative practices
+    targeting these gaps — ranking is never delegated to the LLM.
+    """
+    with get_db_session() as conn:
+        row = conn.execute(
+            "SELECT id, scores FROM profile_snapshots WHERE user_id = ? ORDER BY created_at DESC LIMIT 1",
             (user_id,),
         ).fetchone()
 
@@ -1108,35 +1146,98 @@ def generate_roadmap(user_id: str) -> dict[str, Any]:
         return {"error": "No profile snapshot found. Complete assessment first."}
 
     scores = json.loads(row["scores"] or "{}")
-
-    # Identify weakest dimensions by score
-    ranked = sorted(scores.items(), key=lambda x: x[1].get("score", 0) if isinstance(x[1], dict) else x[1])
-    weakest = ranked[:3] if len(ranked) >= 3 else ranked
+    leverage_targets = rank_transmutation_gaps(scores, top_n=3)
 
     return {
+        "leverage_targets": leverage_targets,
         "profile_scores": scores,
-        "weakest_dimensions": [
-            {"dimension": dim, "score": data.get("score", 0) if isinstance(data, dict) else data}
-            for dim, data in weakest
-        ],
         "step_count": 3,
         "instruction": (
-            "Create a 3-step roadmap targeting these dimensions. "
-            "Each step should include: education context, a concrete practice "
-            "mapped to a transmutation operation, and a reflective conversation prompt."
+            "Write narrative practices targeting these leverage_targets. "
+            "For each target, define a structured practice with a unique practice_id, "
+            "title, dimension, sub_dimension (if applicable), and transmutation_operation. "
+            "Persist via save_roadmap with a top-level 'practices' array. "
+            "Log each practice via log_practice_entry passing dimension, sub_dimension, "
+            "and transmutation_operation. "
+            "Do NOT compute leverage or rankings yourself — use the ranked leverage_targets above."
         ),
     }
 
 
 def save_roadmap(user_id: str, roadmap: dict) -> dict[str, Any]:
-    """Persist a development roadmap. Emits development.roadmap SSE event."""
+    """Persist a development roadmap. Emits development.roadmap SSE event.
+
+    Recognizes an optional top-level ``roadmap["practices"]`` array of structured
+    practice dicts ({"practice_id", "title", "dimension", "sub_dimension"|None,
+    "transmutation_operation"}). When present, validates every practice and upserts
+    into roadmap_practices in the same transaction. On any validation failure,
+    returns an error and saves nothing.
+
+    Legacy roadmaps with no ``practices`` key are saved as-is with no upsert.
+    """
+    qb = get_question_bank()
+    dimensions_index = {dim: qb.get_sub_dimensions(dim) for dim in qb.get_dimensions()}
+
+    practices = roadmap.get("practices")
+    if practices is not None:
+        # Validate every practice before touching the DB.
+        all_validation_errors: list[str] = []
+        for practice in practices:
+            errors = validate_practice_linkage(
+                practice.get("dimension"),
+                practice.get("sub_dimension"),
+                practice.get("transmutation_operation"),
+                dimensions_index,
+            )
+            if errors:
+                all_validation_errors.extend(
+                    [f"practice '{practice.get('practice_id', '?')}': {e}" for e in errors]
+                )
+        if all_validation_errors:
+            return {
+                "error": "Invalid practice linkage in roadmap",
+                "validation_errors": all_validation_errors,
+            }
+
     roadmap_id = str(uuid.uuid4())
+    now = datetime.utcnow().isoformat()
 
     with get_db_session() as conn:
         conn.execute(
             "INSERT INTO development_roadmap (id, user_id, roadmap, created_at) VALUES (?, ?, ?, ?)",
-            (roadmap_id, user_id, json.dumps(roadmap), datetime.utcnow().isoformat()),
+            (roadmap_id, user_id, json.dumps(roadmap), now),
         )
+
+        if practices is not None:
+            for practice in practices:
+                rp_id = str(uuid.uuid4())
+                conn.execute(
+                    """INSERT INTO roadmap_practices
+                       (id, user_id, roadmap_id, practice_id, title, dimension, sub_dimension, transmutation_operation, created_at)
+                       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+                       ON CONFLICT(user_id, practice_id) DO UPDATE SET
+                           roadmap_id = excluded.roadmap_id,
+                           title = excluded.title,
+                           dimension = excluded.dimension,
+                           sub_dimension = excluded.sub_dimension,
+                           transmutation_operation = excluded.transmutation_operation""",
+                    (
+                        rp_id,
+                        user_id,
+                        roadmap_id,
+                        practice["practice_id"],
+                        practice.get("title"),
+                        practice["dimension"],
+                        practice.get("sub_dimension"),
+                        practice.get("transmutation_operation"),
+                        now,
+                    ),
+                )
+        else:
+            logger.info(
+                "save_roadmap: legacy roadmap shape (no 'practices' key) saved without linkage upsert",
+                extra={"user_id": user_id, "roadmap_id": roadmap_id},
+            )
 
     return {
         "event_type": "development.roadmap",
@@ -1151,18 +1252,60 @@ def log_practice_entry(
     practice_id: str,
     reflection: str,
     self_rating: int,
+    dimension: Optional[str] = None,
+    sub_dimension: Optional[str] = None,
+    transmutation_operation: Optional[str] = None,
 ) -> dict[str, Any]:
     """Log a practice journal entry. Emits development.practice SSE event.
+
+    Optional linkage args (dimension, sub_dimension, transmutation_operation) are
+    validated when provided; on failure returns {"error":..., "validation_errors":[...]}
+    and writes nothing. When omitted but practice_id matches a roadmap_practices row,
+    linkage is backfilled from it. Legacy callers (positional only) are unaffected.
 
     Also checks total entry count to signal readiness for reassessment
     (10 entries threshold).
     """
+    linkage_provided = dimension is not None or sub_dimension is not None or transmutation_operation is not None
+
+    if linkage_provided:
+        qb = get_question_bank()
+        dimensions_index = {dim: qb.get_sub_dimensions(dim) for dim in qb.get_dimensions()}
+        errors = validate_practice_linkage(dimension, sub_dimension, transmutation_operation, dimensions_index)
+        if errors:
+            return {
+                "error": "Invalid practice linkage",
+                "validation_errors": errors,
+            }
+
     entry_id = str(uuid.uuid4())
 
     with get_db_session() as conn:
+        # Backfill linkage from roadmap_practices when not explicitly provided.
+        if not linkage_provided:
+            rp_row = conn.execute(
+                "SELECT dimension, sub_dimension, transmutation_operation FROM roadmap_practices WHERE user_id = ? AND practice_id = ?",
+                (user_id, practice_id),
+            ).fetchone()
+            if rp_row:
+                dimension = rp_row["dimension"]
+                sub_dimension = rp_row["sub_dimension"]
+                transmutation_operation = rp_row["transmutation_operation"]
+                logger.info(
+                    "log_practice_entry: backfilled linkage from roadmap_practices",
+                    extra={"user_id": user_id, "practice_id": practice_id, "dimension": dimension},
+                )
+
         conn.execute(
-            "INSERT INTO practice_journal (id, user_id, practice_id, reflection, self_rating, created_at) VALUES (?, ?, ?, ?, ?, ?)",
-            (entry_id, user_id, practice_id, reflection, self_rating, datetime.utcnow().isoformat()),
+            """INSERT INTO practice_journal
+               (id, user_id, practice_id, reflection, self_rating, created_at,
+                dimension, sub_dimension, transmutation_operation)
+               VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+            (
+                entry_id, user_id, practice_id, reflection, self_rating,
+                datetime.utcnow().isoformat(),
+                dimension, sub_dimension, transmutation_operation,
+            ),
         )
 
         # Count total entries for reassessment trigger
@@ -1193,6 +1336,54 @@ def log_practice_entry(
         "total_entries": total_entries,
         "reassessment_ready": total_entries >= 10,
         "downward_trend": downward_trend,
+    }
+
+
+def check_roadmap_targets_gaps(user_id: str, roadmap: dict) -> dict[str, Any]:
+    """Check how well a roadmap's practices cover the user's top-leverage gaps.
+
+    Compares the dimensions/sub-dimensions targeted by roadmap["practices"] against
+    the top-leverage gaps from rank_gaps. Returns which gaps are covered and which
+    high-leverage gaps are missed.
+
+    Args:
+        user_id: The user whose profile snapshot to use for gap ranking.
+        roadmap:  The roadmap dict, optionally containing a top-level "practices" array.
+
+    Returns:
+        {"top_gaps": [...], "covered": [...], "uncovered_high_leverage": [...], "coverage_pct": float}
+        or {"error": ...} if no profile snapshot is found.
+    """
+    gaps_result = rank_gaps(user_id, top_n=5)
+    if "error" in gaps_result:
+        return gaps_result
+
+    top_gaps = gaps_result["ranked_targets"]
+
+    # Collect (dimension, sub_dimension) pairs targeted by roadmap practices.
+    practices = roadmap.get("practices") or []
+    targeted: set[tuple[str, Optional[str]]] = {
+        (p.get("dimension"), p.get("sub_dimension")) for p in practices
+    }
+
+    covered: list[dict] = []
+    uncovered_high_leverage: list[dict] = []
+
+    for gap in top_gaps:
+        key = (gap["dimension"], gap["sub_dimension"])
+        if key in targeted:
+            covered.append(gap)
+        else:
+            uncovered_high_leverage.append(gap)
+
+    total = len(top_gaps)
+    coverage_pct = round(len(covered) / total * 100.0, 1) if total > 0 else 0.0
+
+    return {
+        "top_gaps": top_gaps,
+        "covered": covered,
+        "uncovered_high_leverage": uncovered_high_leverage,
+        "coverage_pct": coverage_pct,
     }
 
 

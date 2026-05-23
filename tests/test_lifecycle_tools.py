@@ -13,6 +13,9 @@ from agents.transmutation.tools import (
     log_practice_entry,
     update_roadmap,
     save_roadmap,
+    generate_roadmap,
+    rank_gaps,
+    check_roadmap_targets_gaps,
     generate_comparison_snapshot,
     evaluate_graduation_readiness,
     generate_graduation_artifacts,
@@ -404,3 +407,319 @@ class TestGetGraduationRecord:
         result = get_graduation_record(uid)
         assert result["exists"] is True
         assert result["graduation_indicators"]["stability"]["met"] is True
+
+
+# ── TEST-010: rank_gaps tool ──
+
+def _make_full_scores() -> dict:
+    """Create a realistic scores dict for testing rank_gaps/generate_roadmap."""
+    return {
+        "Transmutation Capacity": {
+            "score": 2.8,
+            "sub_dimensions": {
+                "Deprivation Filtering": {"score": 2.0},
+                "Fulfillment Emission": {"score": 3.0},
+                "Amplification Awareness": {"score": 2.5},
+                "Absorption Patterns": {"score": 4.0},
+                "Conduit Recognition": {"score": 3.0},
+            },
+        },
+        "Emotional Awareness": {"score": 3.5},
+        "Mindfulness": {"score": 2.5},
+        "Cognitive Awareness": {"score": 4.0},
+    }
+
+
+class TestRankGaps:
+    def test_no_snapshot_returns_error(self):
+        uid = _create_user(phase="development")
+        result = rank_gaps(uid)
+        assert "error" in result
+
+    def test_returns_ranked_targets_with_snapshot(self):
+        uid = _create_user(phase="development")
+        _create_snapshot(uid, _make_full_scores())
+        result = rank_gaps(uid)
+        assert "ranked_targets" in result
+        assert "source_snapshot_id" in result
+        assert isinstance(result["ranked_targets"], list)
+        assert len(result["ranked_targets"]) == 3  # default top_n=3
+
+    def test_top_n_respected(self):
+        uid = _create_user(phase="development")
+        _create_snapshot(uid, _make_full_scores())
+        result = rank_gaps(uid, top_n=2)
+        assert len(result["ranked_targets"]) == 2
+
+    def test_ranked_by_leverage_not_raw_score(self):
+        """Leverage ranking differs from raw lowest-score ranking."""
+        uid = _create_user(phase="development")
+        _create_snapshot(uid, _make_full_scores())
+        result = rank_gaps(uid, top_n=5)
+        targets = result["ranked_targets"]
+        leverages = [t["leverage"] for t in targets]
+        # Verify sorted descending by leverage
+        assert leverages == sorted(leverages, reverse=True)
+
+    def test_source_snapshot_id_matches_latest(self):
+        uid = _create_user(phase="development")
+        sid = _create_snapshot(uid, _make_full_scores())
+        result = rank_gaps(uid)
+        assert result["source_snapshot_id"] == sid
+
+
+# ── TEST-011: generate_roadmap returns leverage_targets ──
+
+
+class TestGenerateRoadmap:
+    def test_no_snapshot_returns_error(self):
+        uid = _create_user(phase="development")
+        result = generate_roadmap(uid)
+        assert "error" in result
+
+    def test_returns_leverage_targets_not_weakest_dimensions(self):
+        uid = _create_user(phase="development")
+        _create_snapshot(uid, _make_full_scores())
+        result = generate_roadmap(uid)
+        # New format: leverage_targets
+        assert "leverage_targets" in result
+        assert "profile_scores" in result
+        assert "instruction" in result
+        assert "step_count" in result
+        # Should NOT have old weakest_dimensions key
+        assert "weakest_dimensions" not in result
+
+    def test_leverage_targets_are_ranked(self):
+        uid = _create_user(phase="development")
+        _create_snapshot(uid, _make_full_scores())
+        result = generate_roadmap(uid)
+        targets = result["leverage_targets"]
+        leverages = [t["leverage"] for t in targets]
+        assert leverages == sorted(leverages, reverse=True)
+
+    def test_instruction_mentions_rank_gaps(self):
+        uid = _create_user(phase="development")
+        _create_snapshot(uid, _make_full_scores())
+        result = generate_roadmap(uid)
+        # Instruction should guide LLM to use tool outputs, not compute itself
+        assert "leverage_targets" in result["instruction"].lower() or "leverage" in result["instruction"].lower()
+
+
+# ── TEST-012: log_practice_entry with linkage ──
+
+
+class TestLogPracticeEntryLinkage:
+    def test_legacy_call_saves_with_null_linkage(self):
+        """Existing positional callers unaffected — linkage columns NULL."""
+        uid = _create_user(phase="development")
+        result = log_practice_entry(uid, "p1", "reflection", 7)
+        assert result["saved"] is True
+        assert "error" not in result
+        # Verify linkage columns are NULL in DB
+        with get_db_session() as conn:
+            row = conn.execute(
+                "SELECT dimension, sub_dimension, transmutation_operation FROM practice_journal WHERE user_id = ? AND practice_id = ?",
+                (uid, "p1"),
+            ).fetchone()
+        assert row["dimension"] is None
+        assert row["sub_dimension"] is None
+        assert row["transmutation_operation"] is None
+
+    def test_valid_linkage_saves(self):
+        uid = _create_user(phase="development")
+        result = log_practice_entry(
+            uid, "p2", "reflection", 6,
+            dimension="Emotional Awareness",
+            sub_dimension="Emotion Recognition",
+            transmutation_operation="none",
+        )
+        assert result["saved"] is True
+        assert "error" not in result
+        with get_db_session() as conn:
+            row = conn.execute(
+                "SELECT dimension, sub_dimension, transmutation_operation FROM practice_journal WHERE user_id = ? AND practice_id = ?",
+                (uid, "p2"),
+            ).fetchone()
+        assert row["dimension"] == "Emotional Awareness"
+        assert row["sub_dimension"] == "Emotion Recognition"
+        assert row["transmutation_operation"] == "none"
+
+    def test_invalid_dimension_returns_error_nothing_written(self):
+        uid = _create_user(phase="development")
+        result = log_practice_entry(uid, "p3", "reflection", 5, dimension="Bogus Dimension")
+        assert "error" in result
+        assert "validation_errors" in result
+        assert len(result["validation_errors"]) > 0
+        # Nothing should be written
+        with get_db_session() as conn:
+            count = conn.execute(
+                "SELECT COUNT(*) as cnt FROM practice_journal WHERE user_id = ? AND practice_id = ?",
+                (uid, "p3"),
+            ).fetchone()["cnt"]
+        assert count == 0
+
+    def test_backfill_linkage_from_roadmap_practices(self):
+        """When practice_id matches a roadmap_practices row, linkage is backfilled."""
+        uid = _create_user(phase="development")
+        # Seed a roadmap_practices row directly
+        with get_db_session() as conn:
+            conn.execute(
+                """INSERT INTO roadmap_practices
+                   (id, user_id, roadmap_id, practice_id, title, dimension, sub_dimension, transmutation_operation)
+                   VALUES (?, ?, NULL, ?, ?, ?, ?, ?)""",
+                (str(uuid.uuid4()), uid, "backfill_p", "Backfill Practice",
+                 "Mindfulness", "Attention Control", "none"),
+            )
+        result = log_practice_entry(uid, "backfill_p", "reflection", 7)
+        assert result["saved"] is True
+        with get_db_session() as conn:
+            row = conn.execute(
+                "SELECT dimension, sub_dimension, transmutation_operation FROM practice_journal WHERE user_id = ? AND practice_id = ?",
+                (uid, "backfill_p"),
+            ).fetchone()
+        assert row["dimension"] == "Mindfulness"
+        assert row["sub_dimension"] == "Attention Control"
+
+    def test_trend_and_readiness_unchanged(self):
+        """Downward trend and reassessment_ready still work with linkage args."""
+        uid = _create_user(phase="development")
+        log_practice_entry(uid, "px", "Good", 8, dimension="Mindfulness")
+        log_practice_entry(uid, "px", "OK", 6, dimension="Mindfulness")
+        result = log_practice_entry(uid, "px", "Struggling", 4, dimension="Mindfulness")
+        assert result["downward_trend"] is True
+        assert result["saved"] is True
+
+
+# ── TEST-013: save_roadmap with structured practices ──
+
+
+class TestSaveRoadmapLinkage:
+    def test_legacy_roadmap_saves_without_upsert(self):
+        """Legacy {"steps":[...]} shape saves as-is, no roadmap_practices rows."""
+        uid = _create_user(phase="development")
+        result = save_roadmap(uid, {"steps": [1, 2, 3]})
+        assert result["saved"] is True
+        assert "error" not in result
+        with get_db_session() as conn:
+            count = conn.execute(
+                "SELECT COUNT(*) as cnt FROM roadmap_practices WHERE user_id = ?",
+                (uid,),
+            ).fetchone()["cnt"]
+        assert count == 0
+
+    def test_structured_practices_upserted(self):
+        uid = _create_user(phase="development")
+        practices = [
+            {
+                "practice_id": "sp1",
+                "title": "Practice 1",
+                "dimension": "Emotional Awareness",
+                "sub_dimension": "Emotion Recognition",
+                "transmutation_operation": "none",
+            }
+        ]
+        result = save_roadmap(uid, {"practices": practices, "steps": []})
+        assert result["saved"] is True
+        with get_db_session() as conn:
+            row = conn.execute(
+                "SELECT dimension, sub_dimension, transmutation_operation FROM roadmap_practices WHERE user_id = ? AND practice_id = ?",
+                (uid, "sp1"),
+            ).fetchone()
+        assert row is not None
+        assert row["dimension"] == "Emotional Awareness"
+
+    def test_invalid_practice_returns_error_nothing_saved(self):
+        uid = _create_user(phase="development")
+        practices = [
+            {
+                "practice_id": "bad1",
+                "title": "Bad",
+                "dimension": "Bogus Dimension",
+                "sub_dimension": None,
+                "transmutation_operation": "none",
+            }
+        ]
+        result = save_roadmap(uid, {"practices": practices})
+        assert "error" in result
+        assert "validation_errors" in result
+        # Roadmap must NOT be saved
+        with get_db_session() as conn:
+            count = conn.execute(
+                "SELECT COUNT(*) as cnt FROM development_roadmap WHERE user_id = ?",
+                (uid,),
+            ).fetchone()["cnt"]
+        assert count == 0
+
+    def test_upsert_updates_existing_row(self):
+        """Second save_roadmap with same practice_id updates the row."""
+        uid = _create_user(phase="development")
+        practices_v1 = [{"practice_id": "upx", "title": "V1", "dimension": "Mindfulness", "sub_dimension": None, "transmutation_operation": "none"}]
+        practices_v2 = [{"practice_id": "upx", "title": "V2", "dimension": "Emotional Awareness", "sub_dimension": None, "transmutation_operation": "none"}]
+        save_roadmap(uid, {"practices": practices_v1})
+        save_roadmap(uid, {"practices": practices_v2})
+        with get_db_session() as conn:
+            row = conn.execute(
+                "SELECT dimension FROM roadmap_practices WHERE user_id = ? AND practice_id = ?",
+                (uid, "upx"),
+            ).fetchone()
+        assert row["dimension"] == "Emotional Awareness"
+
+
+# ── TEST-014: check_roadmap_targets_gaps ──
+
+
+class TestCheckRoadmapTargetsGaps:
+    def test_no_snapshot_returns_error(self):
+        uid = _create_user(phase="development")
+        result = check_roadmap_targets_gaps(uid, {"practices": []})
+        assert "error" in result
+
+    def test_covered_gap_reported(self):
+        uid = _create_user(phase="development")
+        _create_snapshot(uid, _make_full_scores())
+        # Get the top gap's dimension/sub_dimension
+        gaps = rank_gaps(uid, top_n=1)
+        top = gaps["ranked_targets"][0]
+        roadmap = {
+            "practices": [
+                {
+                    "practice_id": "cover_p",
+                    "title": "Cover top gap",
+                    "dimension": top["dimension"],
+                    "sub_dimension": top["sub_dimension"],
+                    "transmutation_operation": top["operation"],
+                }
+            ]
+        }
+        result = check_roadmap_targets_gaps(uid, roadmap)
+        assert "covered" in result
+        assert any(
+            g["dimension"] == top["dimension"] and g["sub_dimension"] == top["sub_dimension"]
+            for g in result["covered"]
+        )
+
+    def test_uncovered_high_leverage_gap_reported(self):
+        uid = _create_user(phase="development")
+        _create_snapshot(uid, _make_full_scores())
+        # Empty practices means nothing is covered
+        result = check_roadmap_targets_gaps(uid, {"practices": []})
+        assert len(result["uncovered_high_leverage"]) > 0
+        assert result["coverage_pct"] == 0.0
+
+    def test_coverage_pct_100_when_all_top_covered(self):
+        uid = _create_user(phase="development")
+        _create_snapshot(uid, _make_full_scores())
+        gaps = rank_gaps(uid, top_n=5)
+        practices = [
+            {
+                "practice_id": f"p_{i}",
+                "title": f"Practice {i}",
+                "dimension": t["dimension"],
+                "sub_dimension": t["sub_dimension"],
+                "transmutation_operation": t["operation"],
+            }
+            for i, t in enumerate(gaps["ranked_targets"])
+        ]
+        result = check_roadmap_targets_gaps(uid, {"practices": practices})
+        assert result["coverage_pct"] == 100.0
+        assert len(result["uncovered_high_leverage"]) == 0
