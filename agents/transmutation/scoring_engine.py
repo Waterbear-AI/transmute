@@ -60,6 +60,106 @@ def _enrich_scenario_responses(
     return scenario_responses
 
 
+def normalize_score(score: float, lo: float = 1.0, hi: float = 5.0) -> float:
+    """Map a raw Likert score from [lo, hi] to the [0, 100] scale.
+
+    Uses the formula (score - lo) / (hi - lo) * 100 so that lo→0 and hi→100.
+    Exported for reuse by the sentinel engine and downstream projects (P2).
+
+    Args:
+        score: Raw score value (typically 1–5 Likert).
+        lo: Lower bound of the raw scale (default 1.0).
+        hi: Upper bound of the raw scale (default 5.0).
+
+    Returns:
+        Score mapped to 0–100.
+    """
+    return (score - lo) / (hi - lo) * 100.0
+
+
+def score_question_subset(
+    responses: dict,
+    question_ids: list,
+    qb,
+) -> dict:
+    """Compute dimension/sub-dimension averages from ONLY the given question IDs.
+
+    Applies the same reverse-scoring (reverse_scored → (points+1)−raw) and
+    None/N-A rules as _score_likert_by_dimension, but restricted to the
+    provided question_ids (the sentinel signal).
+
+    Args:
+        responses: Mapping of question_id → {"score": float|None, ...}.
+        question_ids: The subset of question IDs to consider.
+        qb: QuestionBank instance providing question metadata.
+
+    Returns:
+        {dim: {"score": float, "sub_dimensions": {sd: {"score": float, "answered": int}}, "answered": int}}
+        Only dimensions with ≥1 answered sentinel question are included;
+        dimensions/sub-dimensions with no answered sentinel question are absent.
+    """
+    qid_set = set(question_ids)
+
+    # Accumulate per-(dim, sub_dim) scores
+    dim_data: dict[str, dict] = {}
+
+    for qid in question_ids:
+        q = qb.get_question_by_id(qid)
+        if q is None:
+            continue
+
+        dim = q["dimension"]
+        sub_dim = q.get("sub_dimension", "general")
+
+        if dim not in dim_data:
+            dim_data[dim] = {"scores": [], "sub_dimensions": {}}
+        if sub_dim not in dim_data[dim]["sub_dimensions"]:
+            dim_data[dim]["sub_dimensions"][sub_dim] = []
+
+        if qid not in responses:
+            continue
+
+        resp = responses[qid]
+        raw_score = resp.get("score")
+
+        # Handle N/A responses
+        if raw_score is None:
+            continue
+
+        # Apply reverse scoring
+        if q.get("reverse_scored"):
+            scale_type = q.get("scale_type", "agreement_5")
+            points = qb.scale_types.get(scale_type, {}).get("points", 5)
+            raw_score = (points + 1) - raw_score
+
+        dim_data[dim]["scores"].append(raw_score)
+        dim_data[dim]["sub_dimensions"][sub_dim].append(raw_score)
+
+    # Build result dict — only include dims with ≥1 answered question
+    result: dict[str, dict] = {}
+    for dim, data in dim_data.items():
+        dim_scores = data["scores"]
+        if not dim_scores:
+            continue  # No answered questions for this dim in the subset
+
+        sub_dim_results: dict[str, dict] = {}
+        for sd_name, sd_scores in data["sub_dimensions"].items():
+            if sd_scores:
+                sub_dim_results[sd_name] = {
+                    "score": round(sum(sd_scores) / len(sd_scores), 2),
+                    "answered": len(sd_scores),
+                }
+            # Sub-dims with no answered questions are absent (caller carries prior)
+
+        result[dim] = {
+            "score": round(sum(dim_scores) / len(dim_scores), 2),
+            "sub_dimensions": sub_dim_results,
+            "answered": len(dim_scores),
+        }
+
+    return result
+
+
 def score_responses(
     responses: dict[str, Any],
     scenario_responses: dict[str, Any],

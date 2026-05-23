@@ -12,6 +12,8 @@ from agents.transmutation.scoring_engine import (
     _map_archetype,
     _calculate_quadrant,
     _enrich_scenario_responses,
+    normalize_score,
+    score_question_subset,
     CONDUIT_THRESHOLD,
 )
 
@@ -232,3 +234,151 @@ class TestEnrichScenarioResponses:
                 self._make_mock_qb(),
             )
         assert "Backfilled missing fields for scenario sc-1" in caplog.text
+
+
+class TestNormalizeScore:
+    """Unit tests for normalize_score: maps 1–5 Likert to 0–100."""
+
+    def test_lo_maps_to_zero(self):
+        assert normalize_score(1.0) == 0.0
+
+    def test_hi_maps_to_hundred(self):
+        assert normalize_score(5.0) == 100.0
+
+    def test_midpoint_maps_to_fifty(self):
+        assert normalize_score(3.0) == 50.0
+
+    def test_custom_range(self):
+        # normalize_score(5.0, lo=0.0, hi=10.0) → 50.0
+        assert normalize_score(5.0, lo=0.0, hi=10.0) == 50.0
+
+    def test_default_scale_quarter(self):
+        # 2.0 on 1–5 → (2-1)/(5-1)*100 = 25.0
+        assert normalize_score(2.0) == 25.0
+
+    def test_default_scale_three_quarter(self):
+        # 4.0 on 1–5 → (4-1)/(5-1)*100 = 75.0
+        assert normalize_score(4.0) == 75.0
+
+
+class TestScoreQuestionSubset:
+    """Unit tests for score_question_subset with a mock QuestionBank."""
+
+    @staticmethod
+    def _make_qb(questions):
+        """Build a minimal mock QuestionBank from a list of question dicts."""
+        class MockQB:
+            def __init__(self, qs):
+                self._by_id = {q["id"]: q for q in qs}
+                self.scale_types = {"agreement_5": {"points": 5}}
+
+            def get_question_by_id(self, qid):
+                return self._by_id.get(qid)
+
+        return MockQB(questions)
+
+    def test_basic_averaging(self):
+        """Averages scores for a single dimension correctly."""
+        qb = self._make_qb([
+            {"id": "q1", "dimension": "Focus", "sub_dimension": "Attention", "reverse_scored": False, "scale_type": "agreement_5"},
+            {"id": "q2", "dimension": "Focus", "sub_dimension": "Attention", "reverse_scored": False, "scale_type": "agreement_5"},
+        ])
+        responses = {"q1": {"score": 3}, "q2": {"score": 5}}
+        result = score_question_subset(responses, ["q1", "q2"], qb)
+        assert "Focus" in result
+        assert result["Focus"]["score"] == 4.0
+        assert result["Focus"]["answered"] == 2
+
+    def test_ignores_questions_not_in_subset(self):
+        """Only considers question IDs in the provided subset."""
+        qb = self._make_qb([
+            {"id": "q1", "dimension": "Focus", "sub_dimension": "Attention", "reverse_scored": False, "scale_type": "agreement_5"},
+            {"id": "q2", "dimension": "Focus", "sub_dimension": "Attention", "reverse_scored": False, "scale_type": "agreement_5"},
+        ])
+        # q2 is answered but NOT in the sentinel subset
+        responses = {"q1": {"score": 3}, "q2": {"score": 5}}
+        result = score_question_subset(responses, ["q1"], qb)
+        assert result["Focus"]["score"] == 3.0
+        assert result["Focus"]["answered"] == 1
+
+    def test_reverse_scoring_applied(self):
+        """Reverse-scored questions use (points+1) - raw."""
+        qb = self._make_qb([
+            {"id": "q1", "dimension": "Focus", "sub_dimension": "gen", "reverse_scored": True, "scale_type": "agreement_5"},
+        ])
+        responses = {"q1": {"score": 2}}
+        result = score_question_subset(responses, ["q1"], qb)
+        # (5+1) - 2 = 4
+        assert result["Focus"]["score"] == 4.0
+
+    def test_na_score_excluded(self):
+        """Questions with score=None are treated as N/A and excluded."""
+        qb = self._make_qb([
+            {"id": "q1", "dimension": "Focus", "sub_dimension": "gen", "reverse_scored": False, "scale_type": "agreement_5"},
+            {"id": "q2", "dimension": "Focus", "sub_dimension": "gen", "reverse_scored": False, "scale_type": "agreement_5"},
+        ])
+        responses = {"q1": {"score": None}, "q2": {"score": 4}}
+        result = score_question_subset(responses, ["q1", "q2"], qb)
+        assert result["Focus"]["score"] == 4.0
+        assert result["Focus"]["answered"] == 1
+
+    def test_absent_dim_when_no_answered_question(self):
+        """A dimension is absent when no sentinel questions are answered."""
+        qb = self._make_qb([
+            {"id": "q1", "dimension": "Focus", "sub_dimension": "gen", "reverse_scored": False, "scale_type": "agreement_5"},
+        ])
+        # q1 not in responses at all
+        result = score_question_subset({}, ["q1"], qb)
+        assert "Focus" not in result
+
+    def test_absent_dim_when_all_na(self):
+        """A dimension is absent when all answered scores are None."""
+        qb = self._make_qb([
+            {"id": "q1", "dimension": "Focus", "sub_dimension": "gen", "reverse_scored": False, "scale_type": "agreement_5"},
+        ])
+        result = score_question_subset({"q1": {"score": None}}, ["q1"], qb)
+        assert "Focus" not in result
+
+    def test_sub_dimension_averaging(self):
+        """Sub-dimensions are averaged independently."""
+        qb = self._make_qb([
+            {"id": "q1", "dimension": "Focus", "sub_dimension": "Attention", "reverse_scored": False, "scale_type": "agreement_5"},
+            {"id": "q2", "dimension": "Focus", "sub_dimension": "Clarity", "reverse_scored": False, "scale_type": "agreement_5"},
+        ])
+        responses = {"q1": {"score": 2}, "q2": {"score": 4}}
+        result = score_question_subset(responses, ["q1", "q2"], qb)
+        assert result["Focus"]["sub_dimensions"]["Attention"]["score"] == 2.0
+        assert result["Focus"]["sub_dimensions"]["Clarity"]["score"] == 4.0
+
+    def test_sub_dim_absent_when_no_answered(self):
+        """Sub-dimension absent from result when no sentinel questions answered for it."""
+        qb = self._make_qb([
+            {"id": "q1", "dimension": "Focus", "sub_dimension": "Attention", "reverse_scored": False, "scale_type": "agreement_5"},
+            {"id": "q2", "dimension": "Focus", "sub_dimension": "Clarity", "reverse_scored": False, "scale_type": "agreement_5"},
+        ])
+        # Only q1 answered; q2 is in subset but no response
+        responses = {"q1": {"score": 3}}
+        result = score_question_subset(responses, ["q1", "q2"], qb)
+        assert "Attention" in result["Focus"]["sub_dimensions"]
+        assert "Clarity" not in result["Focus"]["sub_dimensions"]
+
+    def test_multiple_dimensions(self):
+        """Multiple dimensions returned when questions span dimensions."""
+        qb = self._make_qb([
+            {"id": "q1", "dimension": "Focus", "sub_dimension": "gen", "reverse_scored": False, "scale_type": "agreement_5"},
+            {"id": "q2", "dimension": "Resilience", "sub_dimension": "gen", "reverse_scored": False, "scale_type": "agreement_5"},
+        ])
+        responses = {"q1": {"score": 3}, "q2": {"score": 5}}
+        result = score_question_subset(responses, ["q1", "q2"], qb)
+        assert "Focus" in result
+        assert "Resilience" in result
+
+    def test_unknown_question_id_ignored(self):
+        """Question IDs not found in qb are silently ignored."""
+        qb = self._make_qb([
+            {"id": "q1", "dimension": "Focus", "sub_dimension": "gen", "reverse_scored": False, "scale_type": "agreement_5"},
+        ])
+        responses = {"q1": {"score": 3}, "unknown": {"score": 5}}
+        result = score_question_subset(responses, ["q1", "unknown"], qb)
+        assert "Focus" in result
+        assert result["Focus"]["answered"] == 1
