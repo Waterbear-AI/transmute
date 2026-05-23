@@ -1562,16 +1562,24 @@ def generate_comparison_snapshot(
         curr_score = curr_val.get("score", 0) if isinstance(curr_val, dict) else curr_val
         prev_score = prev_val.get("score", 0) if isinstance(prev_val, dict) else prev_val
         delta = round(curr_score - prev_score, 2)
+        # Raw deltas are on the engine's 1–5 scale. The *_normalized fields
+        # express the same change on the 0–100 scale (scoring_engine.normalize_score)
+        # so consumers never have to guess which scale a delta is on.
+        prev_norm = round(normalize_score(prev_score), 2)
+        curr_norm = round(normalize_score(curr_score), 2)
         deltas[dim] = {
             "previous": prev_score,
             "current": curr_score,
             "delta": delta,
+            "previous_normalized": prev_norm,
+            "current_normalized": curr_norm,
+            "delta_normalized": round(curr_norm - prev_norm, 2),
             "direction": "up" if delta > 0 else "down" if delta < 0 else "stable",
         }
 
-    # Quadrant shift
-    curr_q = current_quadrant.get("quadrant", "")
-    prev_q = previous_quadrant.get("quadrant", "")
+    # Quadrant shift (archetype-aware; production snapshots store "archetype")
+    curr_q = _snapshot_archetype(current_quadrant)
+    prev_q = _snapshot_archetype(previous_quadrant)
     quadrant_shifted = curr_q != prev_q
 
     # Flow data deltas
@@ -1665,32 +1673,45 @@ def evaluate_graduation_readiness(user_id: str) -> dict[str, Any]:
         scores = [json.loads(s["scores"] or "{}") for s in snapshots]
         quadrants = [json.loads(s["quadrant_placement"] or "{}") for s in snapshots]
 
-        # 1. Pattern Stability: delta < 5% for 2 consecutive cycles
-        # Cycle 1: current vs previous, Cycle 2: previous vs before_previous
+        # 1. Pattern Stability: max per-dimension movement < threshold on the
+        # normalized 0–100 scale for 2 consecutive cycles. Scores are normalized
+        # via scoring_engine.normalize_score before differencing, so the
+        # comparison is scale-correct (raw 1–5 deltas could never exceed 5).
+        # Cycle 1: current vs previous, Cycle 2: previous vs before_previous.
         def compute_max_delta(scores_a, scores_b):
-            max_delta = 0
-            for dim in set(list(scores_a.keys()) + list(scores_b.keys())):
-                a = scores_a.get(dim, {})
-                b = scores_b.get(dim, {})
-                sa = a.get("score", 0) if isinstance(a, dict) else a
-                sb = b.get("score", 0) if isinstance(b, dict) else b
-                max_delta = max(max_delta, abs(sa - sb))
+            max_delta = 0.0
+            # Intersection only: a dimension absent on either side is skipped,
+            # never defaulted to 0 (which normalize_score maps to -25 and would
+            # manufacture a phantom delta).
+            for dim in set(scores_a.keys()) & set(scores_b.keys()):
+                a = scores_a[dim]
+                b = scores_b[dim]
+                sa = a.get("score") if isinstance(a, dict) else a
+                sb = b.get("score") if isinstance(b, dict) else b
+                if sa is None or sb is None:
+                    continue
+                delta = abs(normalize_score(sa) - normalize_score(sb))
+                max_delta = max(max_delta, delta)
             return round(max_delta, 2)
 
         delta_cycle1 = compute_max_delta(scores[0], scores[1])
         delta_cycle2 = compute_max_delta(scores[1], scores[2])
 
-        stability_met = delta_cycle1 < 5 and delta_cycle2 < 5
+        stability_met = (
+            delta_cycle1 < GRADUATION_STABILITY_MAX_NORMALIZED
+            and delta_cycle2 < GRADUATION_STABILITY_MAX_NORMALIZED
+        )
         indicators["pattern_stability"]["met"] = stability_met
         indicators["pattern_stability"]["evidence"] = (
-            f"Cycle 1 max delta: {delta_cycle1}%, Cycle 2 max delta: {delta_cycle2}% "
-            f"(threshold: <5% for both)"
+            f"Cycle 1 max normalized delta: {delta_cycle1} pts, "
+            f"Cycle 2 max normalized delta: {delta_cycle2} pts "
+            f"(threshold: < {GRADUATION_STABILITY_MAX_NORMALIZED} pts on 0–100 scale for both)"
         )
 
-        # 2. Quadrant Consolidation: same quadrant for 2 consecutive reassessments
-        q0 = quadrants[0].get("quadrant", "")
-        q1 = quadrants[1].get("quadrant", "")
-        q2 = quadrants[2].get("quadrant", "")
+        # 2. Quadrant Consolidation: same archetype for 2 consecutive reassessments
+        q0 = _snapshot_archetype(quadrants[0])
+        q1 = _snapshot_archetype(quadrants[1])
+        q2 = _snapshot_archetype(quadrants[2])
 
         consolidation_met = q0 == q1 and q1 == q2 and q0 != ""
         indicators["quadrant_consolidation"]["met"] = consolidation_met
@@ -1827,8 +1848,8 @@ def generate_graduation_artifacts(user_id: str) -> dict[str, Any]:
         "unique_practices": len(practice_map),
         "roadmap_count": len(roadmaps),
         "growth_trajectory": growth,
-        "initial_quadrant": json.loads(first_snapshot["quadrant_placement"] or "{}").get("quadrant", "") if first_snapshot else "",
-        "final_quadrant": json.loads(last_snapshot["quadrant_placement"] or "{}").get("quadrant", "") if last_snapshot else "",
+        "initial_quadrant": _snapshot_archetype(json.loads(first_snapshot["quadrant_placement"] or "{}")) if first_snapshot else "",
+        "final_quadrant": _snapshot_archetype(json.loads(last_snapshot["quadrant_placement"] or "{}")) if last_snapshot else "",
         "graduation_indicators": readiness.get("indicators", {}),
     }
 
