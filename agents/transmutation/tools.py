@@ -6,7 +6,7 @@ from typing import Any, Optional
 
 from db.database import get_db_session
 from agents.transmutation.question_bank import get_question_bank
-from agents.transmutation.scoring_engine import score_responses
+from agents.transmutation.scoring_engine import score_responses, normalize_score
 from agents.transmutation.spider_chart import generate_spider_chart
 
 logger = logging.getLogger(__name__)
@@ -1595,4 +1595,254 @@ def save_check_in_log(
         "log_id": log_id,
         "regression_detected": regression_detected,
         "re_entered_development": re_entered_development,
+    }
+
+
+# ── Reassessment selection tools ───────────────────────────────────────
+
+
+def get_dimension_staleness(user_id: str) -> dict[str, Any]:
+    """Return the current reassessment cycle and per-dimension staleness for a user.
+
+    Staleness = current_cycle − last_assessed_cycle for each dimension.
+    Dimensions never assessed default to last_assessed_cycle=0 and
+    staleness=current_cycle (they are as stale as the cycle count allows).
+
+    Returns:
+        {
+            "current_cycle": int,
+            "staleness": {dim: int},
+            "last_assessed_cycle": {dim: int},
+        }
+    """
+    qb = get_question_bank()
+    all_dims = qb.get_dimensions()
+
+    with get_db_session() as conn:
+        user_row = conn.execute(
+            "SELECT reassessment_cycle FROM users WHERE id = ?",
+            (user_id,),
+        ).fetchone()
+
+        if not user_row:
+            return {"error": f"User {user_id} not found"}
+
+        current_cycle = user_row["reassessment_cycle"]
+
+        das_rows = conn.execute(
+            "SELECT dimension, last_assessed_cycle FROM dimension_assessment_state WHERE user_id = ?",
+            (user_id,),
+        ).fetchall()
+
+    last_assessed: dict[str, int] = {row["dimension"]: row["last_assessed_cycle"] for row in das_rows}
+
+    staleness: dict[str, int] = {}
+    last_assessed_result: dict[str, int] = {}
+    for dim in all_dims:
+        lac = last_assessed.get(dim, 0)
+        last_assessed_result[dim] = lac
+        staleness[dim] = current_cycle - lac
+
+    return {
+        "current_cycle": current_cycle,
+        "staleness": staleness,
+        "last_assessed_cycle": last_assessed_result,
+    }
+
+
+def _extract_dimensions_from_roadmap(roadmap: Any, known_dims: set) -> list:
+    """Extract known dimension names from free-form roadmap JSON.
+
+    Scans string values at keys dimension/dimensions/target/targets and
+    within steps[] arrays. Returns exact matches only (case-sensitive, de-duplicated,
+    order-preserving). Non-matching strings are silently ignored.
+    """
+    found: list = []
+    seen: set = set()
+
+    def _add(candidate: Any) -> None:
+        if isinstance(candidate, str) and candidate in known_dims and candidate not in seen:
+            found.append(candidate)
+            seen.add(candidate)
+
+    def _scan_obj(obj: Any) -> None:
+        if isinstance(obj, dict):
+            for key in ("dimension", "dimensions", "target", "targets"):
+                val = obj.get(key)
+                if isinstance(val, list):
+                    for item in val:
+                        _add(item)
+                else:
+                    _add(val)
+            # Recurse into steps[]
+            for step in obj.get("steps", []):
+                _scan_obj(step)
+            # Recurse into nested dicts
+            for v in obj.values():
+                if isinstance(v, (dict, list)):
+                    _scan_obj(v)
+        elif isinstance(obj, list):
+            for item in obj:
+                _scan_obj(item)
+
+    _scan_obj(roadmap)
+    return found
+
+
+def select_reassessment_targets(user_id: str) -> dict[str, Any]:
+    """Determine which dimensions are targeted, sentinel, forced, and carried for reassessment.
+
+    Orchestrates the selection by:
+    1. Extracting targeted dims from the development roadmap (exact dimension name match).
+    2. Adding any dims flagged for full reassessment from the prior cycle.
+    3. Running staleness-based sentinel selection (excluding targeted dims).
+    4. Classifying all remaining dims as carried.
+
+    No-roadmap / no-match fallback: if no dimensions extractable from roadmap,
+    targeted_dimensions = flagged-from-prior-cycle dims only (possibly empty).
+    This is a valid all-sentinel/all-carried partition, not an error.
+
+    Returns:
+        {
+            "targeted_dimensions": [dim, ...],
+            "sentinel_dimensions": [dim, ...],
+            "forced_dimensions": [dim, ...],
+            "carried_dimensions": [dim, ...],
+        }
+    """
+    from agents.transmutation.sentinel_engine import select_sentinel_dimensions
+
+    qb = get_question_bank()
+    all_dims = qb.get_dimensions()
+    known_dims = set(all_dims)
+
+    # Step 1: Extract roadmap-targeted dims
+    roadmap_result = get_development_roadmap(user_id)
+    roadmap_dims: list = []
+    if roadmap_result.get("exists"):
+        roadmap_json = roadmap_result.get("roadmap", {})
+        roadmap_dims = _extract_dimensions_from_roadmap(roadmap_json, known_dims)
+
+    # Step 2: Add prior-cycle flagged dims
+    with get_db_session() as conn:
+        flagged_rows = conn.execute(
+            "SELECT dimension FROM dimension_assessment_state WHERE user_id = ? AND flagged_for_full_reassessment = 1",
+            (user_id,),
+        ).fetchall()
+    flagged_dims = [row["dimension"] for row in flagged_rows]
+
+    # Merge: roadmap dims + flagged, de-duplicated, order-preserving
+    targeted_set: set = set()
+    targeted: list = []
+    for dim in roadmap_dims + flagged_dims:
+        if dim in known_dims and dim not in targeted_set:
+            targeted.append(dim)
+            targeted_set.add(dim)
+
+    # Step 3: Sentinel selection from remaining dims
+    staleness_result = get_dimension_staleness(user_id)
+    if "error" in staleness_result:
+        return staleness_result
+
+    staleness_by_dim = staleness_result["staleness"]
+
+    # Fetch prior scores for extremity calculation
+    with get_db_session() as conn:
+        snap_row = conn.execute(
+            "SELECT scores FROM profile_snapshots WHERE user_id = ? ORDER BY created_at DESC LIMIT 1",
+            (user_id,),
+        ).fetchone()
+
+    prior_scores: dict = {}
+    if snap_row:
+        prior_scores = json.loads(snap_row["scores"] or "{}")
+
+    sentinel_result = select_sentinel_dimensions(
+        staleness_by_dim,
+        prior_scores,
+        excluded=targeted,
+    )
+
+    sentinel_dims = sentinel_result["selected"]
+    forced_dims = sentinel_result["forced"]
+
+    # Step 4: Everything else is carried
+    targeted_and_sentinel = targeted_set | set(sentinel_dims)
+    carried = [d for d in all_dims if d not in targeted_and_sentinel]
+
+    logger.info(
+        "Reassessment targets selected: targeted=%d, sentinel=%d (forced=%d), carried=%d",
+        len(targeted), len(sentinel_dims), len(forced_dims), len(carried),
+    )
+
+    return {
+        "targeted_dimensions": targeted,
+        "sentinel_dimensions": sentinel_dims,
+        "forced_dimensions": forced_dims,
+        "carried_dimensions": carried,
+    }
+
+
+def select_sentinel_questions(
+    user_id: str,
+    dimensions: list,
+    n: int = 5,
+) -> dict[str, Any]:
+    """Select question IDs for sentinel dimensions, prioritizing by response extremity.
+
+    For each dimension, picks up to n question IDs whose prior responses were most
+    extreme (closest to 1 or 5 on the Likert scale). Questions with no prior response
+    are included last (so novel questions fill remaining slots).
+
+    Args:
+        user_id:    User to fetch prior responses for.
+        dimensions: Sentinel dimension names to select questions from.
+        n:          Number of questions per dimension (default 5).
+
+    Returns:
+        {
+            "question_ids": [qid, ...],       # flat list, all selected IDs
+            "by_dimension": {dim: [qid, ...]}, # per-dimension breakdown
+        }
+    """
+    qb = get_question_bank()
+
+    # Fetch prior responses (most recent assessment state)
+    with get_db_session() as conn:
+        row = conn.execute(
+            "SELECT responses FROM assessment_state WHERE user_id = ? ORDER BY created_at DESC LIMIT 1",
+            (user_id,),
+        ).fetchone()
+
+    prior_responses: dict = {}
+    if row:
+        prior_responses = json.loads(row["responses"] or "{}")
+
+    all_question_ids: list = []
+    by_dimension: dict = {}
+
+    for dim in dimensions:
+        questions = qb.get_questions_by_dimension(dim)
+        if not questions:
+            by_dimension[dim] = []
+            continue
+
+        def _extremity_key(q: dict) -> float:
+            resp = prior_responses.get(q["id"])
+            if resp is None:
+                return -1.0  # no prior → least extreme → last
+            score = resp.get("score")
+            if score is None:
+                return -1.0
+            # extremity = distance from midpoint 3.0 on 1-5 scale; max=2.0
+            return abs(score - 3.0)
+
+        sorted_qs = sorted(questions, key=_extremity_key, reverse=True)
+        selected_ids = [q["id"] for q in sorted_qs[:n]]
+        by_dimension[dim] = selected_ids
+        all_question_ids.extend(selected_ids)
+
+    return {
+        "question_ids": all_question_ids,
+        "by_dimension": by_dimension,
     }
