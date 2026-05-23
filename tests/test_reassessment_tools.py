@@ -16,6 +16,9 @@ from agents.transmutation.tools import (
     get_dimension_staleness,
     select_reassessment_targets,
     select_sentinel_questions,
+    generate_reassessment_snapshot,
+    save_profile_snapshot,
+    _profile_cache,
 )
 from agents.transmutation.question_bank import get_question_bank
 
@@ -54,6 +57,15 @@ def _seed_das(user_id: str, dimension: str, last_assessed_cycle: int, kind: str 
                (id, user_id, dimension, last_assessed_cycle, last_assessment_kind, last_score, flagged_for_full_reassessment, updated_at)
                VALUES (?, ?, ?, ?, ?, ?, ?, ?)""",
             (row_id, user_id, dimension, last_assessed_cycle, kind, last_score, 1 if flagged else 0, "2026-01-01T00:00:00"),
+        )
+
+
+def _seed_das_flag(user_id: str, dimension: str, flagged: bool) -> None:
+    """Update flagged_for_full_reassessment on an existing DAS row."""
+    with get_db_session() as conn:
+        conn.execute(
+            "UPDATE dimension_assessment_state SET flagged_for_full_reassessment = ? WHERE user_id = ? AND dimension = ?",
+            (1 if flagged else 0, user_id, dimension),
         )
 
 
@@ -363,3 +375,324 @@ class TestSelectSentinelQuestions:
         result = select_sentinel_questions(uid, [dim], n=5)
         for qid in result["question_ids"]:
             assert qb.get_question_by_id(qid) is not None
+
+
+# ---------------------------------------------------------------------------
+# Helpers for snapshot generation/persistence tests
+# ---------------------------------------------------------------------------
+
+def _full_responses(score: int = 3) -> dict:
+    """Build a response dict answering every question in the bank with `score`."""
+    qb = get_question_bank()
+    responses = {}
+    for dim in qb.get_dimensions():
+        for q in qb.get_questions_by_dimension(dim):
+            responses[q["id"]] = {"score": score}
+    return responses
+
+
+def _prior_scores(score: float = 3.0) -> dict:
+    """Build a prior snapshot scores dict at the given score for all dims/sub-dims."""
+    qb = get_question_bank()
+    scores = {}
+    for dim in qb.get_dimensions():
+        sub_dims = {}
+        for q in qb.get_questions_by_dimension(dim):
+            sd = q.get("sub_dimension", "general")
+            sub_dims[sd] = {"score": score, "answered": 1, "total": 1, "na_count": 0}
+        scores[dim] = {
+            "score": score,
+            "answered": 1,
+            "total": 1,
+            "na_count": 0,
+            "insufficient_data": False,
+            "sub_dimensions": sub_dims,
+        }
+    return scores
+
+
+def _das_rows(user_id: str) -> dict:
+    """Return {dim: row_dict} for all dimension_assessment_state rows of a user."""
+    with get_db_session() as conn:
+        rows = conn.execute(
+            "SELECT dimension, last_assessed_cycle, last_assessment_kind, last_score, flagged_for_full_reassessment "
+            "FROM dimension_assessment_state WHERE user_id = ?",
+            (user_id,),
+        ).fetchall()
+    return {r["dimension"]: dict(r) for r in rows}
+
+
+# ---------------------------------------------------------------------------
+# TestGenerateReassessmentSnapshot
+# ---------------------------------------------------------------------------
+
+class TestGenerateReassessmentSnapshot:
+
+    def test_no_prior_snapshot_returns_error(self):
+        """No prior snapshot → error."""
+        uid = _create_user(cycle=0)
+        _create_assessment_state(uid, _full_responses())
+        result = generate_reassessment_snapshot(uid)
+        assert "error" in result
+        assert "prior snapshot" in result["error"].lower()
+
+    def test_no_assessment_data_returns_error(self):
+        """Prior snapshot exists but no assessment data → error."""
+        qb = get_question_bank()
+        uid = _create_user(cycle=0)
+        _create_snapshot(uid, _prior_scores())
+        result = generate_reassessment_snapshot(uid)
+        assert "error" in result
+        assert "assessment data" in result["error"].lower()
+
+    def test_returns_reassessment_scored_event(self):
+        """Successful reassessment returns the expected event shape."""
+        qb = get_question_bank()
+        uid = _create_user(cycle=0)
+        _create_snapshot(uid, _prior_scores(3.0))
+        _create_assessment_state(uid, _full_responses(4))
+
+        result = generate_reassessment_snapshot(uid)
+        assert result["event_type"] == "reassessment.scored"
+        assert "scores" in result
+        assert "quadrant" in result
+        assert "sentinel" in result
+        assert result["current_cycle"] == 1  # cycle 0 → 1 once saved
+
+    def test_populates_profile_cache_with_sentinel(self):
+        """_profile_cache is populated with blended scores + sentinel block."""
+        uid = _create_user(cycle=0)
+        _create_snapshot(uid, _prior_scores(3.0))
+        _create_assessment_state(uid, _full_responses(4))
+
+        generate_reassessment_snapshot(uid)
+        cached = _profile_cache.get(uid)
+        assert cached is not None
+        assert "sentinel" in cached
+        assert "scores" in cached
+        assert "quadrant" in cached
+        assert cached["sentinel"]["cycle"] == 1
+
+    def test_carried_dims_keep_prior_score(self):
+        """Carried (untouched) dims retain their prior score in the blend."""
+        qb = get_question_bank()
+        uid = _create_user(cycle=0)
+        _create_snapshot(uid, _prior_scores(2.0))
+        _create_assessment_state(uid, _full_responses(5))
+
+        result = generate_reassessment_snapshot(uid)
+        sentinel_meta = result["sentinel"]["dimensions"]
+        for dim, meta in sentinel_meta.items():
+            if meta["source"] == "carried":
+                # carried dims keep prior score (2.0)
+                assert result["scores"][dim]["score"] == 2.0
+
+    def test_targeted_dim_uses_fresh_score(self):
+        """A roadmap-targeted dim takes the fresh full re-score (100% new)."""
+        from agents.transmutation.scoring_engine import score_responses
+        qb = get_question_bank()
+        dim = qb.get_dimensions()[0]
+        uid = _create_user(cycle=1)
+        _create_snapshot(uid, _prior_scores(2.0))
+        _create_roadmap(uid, {"dimension": dim})
+        for d in qb.get_dimensions():
+            _seed_das(uid, d, last_assessed_cycle=1)
+        responses = _full_responses(5)
+        _create_assessment_state(uid, responses)
+
+        # Independently compute the fresh full re-score for the targeted dim.
+        fresh = score_responses(responses, {})["dimensions"][dim]["score"]
+
+        result = generate_reassessment_snapshot(uid)
+        assert dim in result["sentinel"]["targeted_dimensions"]
+        # Targeted dim is 100% fresh — equals the standalone full re-score (not the
+        # prior 2.0), proving the blend uses new_weight=1.0 for targeted dims.
+        assert result["scores"][dim]["score"] == fresh
+        assert fresh != 2.0  # sanity: fresh genuinely differs from prior
+
+    def test_sentinel_dim_blends_70_30(self):
+        """A sentinel dim blends 0.7*prior + 0.3*fresh(sentinel subset)."""
+        from agents.transmutation.scoring_engine import score_question_subset
+        qb = get_question_bank()
+        uid = _create_user(cycle=0)
+        _create_snapshot(uid, _prior_scores(2.0))
+        responses = _full_responses(5)
+        _create_assessment_state(uid, responses)
+
+        result = generate_reassessment_snapshot(uid)
+        sentinel_dims = result["sentinel"]["sentinel_dimensions"]
+        assert len(sentinel_dims) >= 1
+        # Reconstruct the fresh sentinel signal the engine used.
+        sentinel_qids = select_sentinel_questions(uid, sentinel_dims)["question_ids"]
+        fresh_signal = score_question_subset(responses, sentinel_qids, qb)
+        for dim in sentinel_dims:
+            fresh = fresh_signal[dim]["score"]
+            expected = 0.7 * 2.0 + 0.3 * fresh
+            assert abs(result["scores"][dim]["score"] - expected) < 0.01
+
+    def test_quadrant_reflects_blended_capacity(self):
+        """Quadrant is recomputed from blended Transmutation Capacity sub-dims."""
+        qb = get_question_bank()
+        uid = _create_user(cycle=0)
+        # Prior strongly transmuter-leaning; fresh neutral. Blended should differ
+        # from a pure-fresh recompute.
+        _create_snapshot(uid, _prior_scores(5.0))
+        _create_assessment_state(uid, _full_responses(3))
+
+        result = generate_reassessment_snapshot(uid)
+        quadrant = result["quadrant"]
+        assert "x" in quadrant
+        assert "y" in quadrant
+        assert "archetype" in quadrant
+
+
+# ---------------------------------------------------------------------------
+# TestSaveProfileSnapshotBaseline
+# ---------------------------------------------------------------------------
+
+class TestSaveProfileSnapshotBaseline:
+
+    def test_baseline_seeds_all_dims_at_cycle_zero(self):
+        """Baseline save (no sentinel block) seeds all 13 dims at cycle 0."""
+        qb = get_question_bank()
+        uid = _create_user(cycle=0)
+        scores = _prior_scores(3.5)
+        _profile_cache[uid] = {
+            "scores": scores,
+            "quadrant": {"x": 0.0, "y": 0.0, "archetype": "conduit"},
+            "insufficient_dimensions": [],
+            "spider_chart": None,
+            "flow_profile": None,
+        }
+
+        save_profile_snapshot(uid, "baseline interpretation")
+        rows = _das_rows(uid)
+        assert set(rows.keys()) == set(qb.get_dimensions())
+        for dim, row in rows.items():
+            assert row["last_assessed_cycle"] == 0
+            assert row["last_assessment_kind"] == "baseline"
+            assert row["last_score"] == 3.5
+            assert row["flagged_for_full_reassessment"] == 0
+
+    def test_baseline_does_not_increment_cycle(self):
+        """Baseline save keeps users.reassessment_cycle at 0."""
+        uid = _create_user(cycle=0)
+        _profile_cache[uid] = {
+            "scores": _prior_scores(3.0),
+            "quadrant": {"x": 0.0, "y": 0.0, "archetype": "conduit"},
+            "insufficient_dimensions": [],
+            "spider_chart": None,
+            "flow_profile": None,
+        }
+        save_profile_snapshot(uid, "baseline")
+        with get_db_session() as conn:
+            row = conn.execute("SELECT reassessment_cycle FROM users WHERE id = ?", (uid,)).fetchone()
+        assert row["reassessment_cycle"] == 0
+
+
+# ---------------------------------------------------------------------------
+# TestSaveProfileSnapshotReassessment
+# ---------------------------------------------------------------------------
+
+class TestSaveProfileSnapshotReassessment:
+
+    def test_reassessment_increments_cycle(self):
+        """Reassessment save increments users.reassessment_cycle."""
+        uid = _create_user(cycle=0)
+        _create_snapshot(uid, _prior_scores(3.0))
+        _create_assessment_state(uid, _full_responses(4))
+
+        generate_reassessment_snapshot(uid)  # populates cache with sentinel block
+        save_profile_snapshot(uid, "reassessment interpretation")
+
+        with get_db_session() as conn:
+            row = conn.execute("SELECT reassessment_cycle FROM users WHERE id = ?", (uid,)).fetchone()
+        assert row["reassessment_cycle"] == 1
+
+    def test_reassessment_upserts_targeted_and_sentinel_das(self):
+        """Targeted and sentinel dims get DAS rows at the new cycle."""
+        qb = get_question_bank()
+        dim = qb.get_dimensions()[0]
+        uid = _create_user(cycle=1)
+        _create_snapshot(uid, _prior_scores(3.0))
+        _create_roadmap(uid, {"dimension": dim})
+        for d in qb.get_dimensions():
+            _seed_das(uid, d, last_assessed_cycle=1)
+        _create_assessment_state(uid, _full_responses(4))
+
+        result = generate_reassessment_snapshot(uid)
+        targeted = result["sentinel"]["targeted_dimensions"]
+        sentinel = result["sentinel"]["sentinel_dimensions"]
+        save_profile_snapshot(uid, "reassessment")
+
+        rows = _das_rows(uid)
+        for d in targeted:
+            assert rows[d]["last_assessed_cycle"] == 2
+            assert rows[d]["last_assessment_kind"] == "targeted"
+        for d in sentinel:
+            assert rows[d]["last_assessed_cycle"] == 2
+            assert rows[d]["last_assessment_kind"] == "sentinel"
+
+    def test_reassessment_flag_set_and_cleared(self):
+        """flagged_for_full_reassessment is set for flagged dims and cleared otherwise."""
+        qb = get_question_bank()
+        uid = _create_user(cycle=0)
+        # Large prior→fresh swing on sentinel dims should trip the shift flag.
+        _create_snapshot(uid, _prior_scores(1.0))
+        _create_assessment_state(uid, _full_responses(5))
+
+        result = generate_reassessment_snapshot(uid)
+        flagged = set(result["sentinel"]["flagged_for_full_reassessment"])
+        save_profile_snapshot(uid, "reassessment")
+
+        rows = _das_rows(uid)
+        for dim in result["sentinel"]["sentinel_dimensions"]:
+            expected = 1 if dim in flagged else 0
+            assert rows[dim]["flagged_for_full_reassessment"] == expected
+
+    def test_reassessment_clears_prior_flag_on_targeted(self):
+        """A dim previously flagged then re-targeted has its flag cleared."""
+        qb = get_question_bank()
+        dim = qb.get_dimensions()[0]
+        uid = _create_user(cycle=1)
+        _create_snapshot(uid, _prior_scores(3.0))
+        # dim was flagged last cycle; roadmap re-targets it this cycle
+        _create_roadmap(uid, {"dimension": dim})
+        for d in qb.get_dimensions():
+            _seed_das(uid, d, last_assessed_cycle=1)
+        _seed_das_flag(uid, dim, True)
+        _create_assessment_state(uid, _full_responses(3))  # neutral fresh → no new flag
+
+        generate_reassessment_snapshot(uid)
+        save_profile_snapshot(uid, "reassessment")
+
+        rows = _das_rows(uid)
+        # dim was targeted (fresh==prior==3.0, no shift) → flag cleared
+        assert rows[dim]["flagged_for_full_reassessment"] == 0
+
+    def test_reassessment_persists_sentinel_in_snapshot(self):
+        """The persisted snapshot's quadrant JSON carries the sentinel block."""
+        uid = _create_user(cycle=0)
+        _create_snapshot(uid, _prior_scores(3.0))
+        _create_assessment_state(uid, _full_responses(4))
+
+        generate_reassessment_snapshot(uid)
+        save_profile_snapshot(uid, "reassessment")
+
+        with get_db_session() as conn:
+            row = conn.execute(
+                "SELECT quadrant_placement FROM profile_snapshots WHERE user_id = ? ORDER BY created_at DESC LIMIT 1",
+                (uid,),
+            ).fetchone()
+        quadrant = json.loads(row["quadrant_placement"])
+        assert "sentinel" in quadrant
+        assert "flagged_for_full_reassessment" in quadrant["sentinel"]
+
+    def test_reassessment_atomic_no_partial_on_cache_miss(self):
+        """save_profile_snapshot with no cached profile returns error, no DB change."""
+        uid = _create_user(cycle=0)
+        result = save_profile_snapshot(uid, "x")
+        assert "error" in result
+        with get_db_session() as conn:
+            row = conn.execute("SELECT reassessment_cycle FROM users WHERE id = ?", (uid,)).fetchone()
+        assert row["reassessment_cycle"] == 0

@@ -6,7 +6,12 @@ from typing import Any, Optional
 
 from db.database import get_db_session
 from agents.transmutation.question_bank import get_question_bank
-from agents.transmutation.scoring_engine import score_responses, normalize_score
+from agents.transmutation.scoring_engine import (
+    score_responses,
+    normalize_score,
+    score_question_subset,
+    _calculate_quadrant,
+)
 from agents.transmutation.spider_chart import generate_spider_chart
 
 logger = logging.getLogger(__name__)
@@ -722,18 +727,85 @@ def generate_profile_snapshot(user_id: str) -> dict[str, Any]:
 _profile_cache: dict[str, dict[str, Any]] = {}
 
 
+def _upsert_dimension_assessment_state(
+    conn,
+    user_id: str,
+    dimension: str,
+    last_assessed_cycle: int,
+    last_assessment_kind: str,
+    last_score: Optional[float],
+    flagged: bool,
+) -> None:
+    """Idempotently upsert one dimension_assessment_state row.
+
+    Uses the UNIQUE(user_id, dimension) constraint to upsert in a single
+    atomic statement (no check-then-act race). Caller owns the transaction.
+    """
+    conn.execute(
+        """INSERT INTO dimension_assessment_state
+               (id, user_id, dimension, last_assessed_cycle, last_assessment_kind,
+                last_score, flagged_for_full_reassessment, updated_at)
+           VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+           ON CONFLICT(user_id, dimension) DO UPDATE SET
+               last_assessed_cycle = excluded.last_assessed_cycle,
+               last_assessment_kind = excluded.last_assessment_kind,
+               last_score = excluded.last_score,
+               flagged_for_full_reassessment = excluded.flagged_for_full_reassessment,
+               updated_at = excluded.updated_at""",
+        (
+            str(uuid.uuid4()),
+            user_id,
+            dimension,
+            last_assessed_cycle,
+            last_assessment_kind,
+            last_score,
+            1 if flagged else 0,
+            datetime.utcnow().isoformat(),
+        ),
+    )
+
+
+def _dim_score(scores: dict, dim: str) -> Optional[float]:
+    """Extract a dimension's numeric score from a snapshot scores dict."""
+    data = scores.get(dim)
+    if isinstance(data, dict):
+        return data.get("score")
+    if isinstance(data, (int, float)):
+        return float(data)
+    return None
+
+
 def save_profile_snapshot(user_id: str, interpretation: str) -> dict[str, Any]:
     """Persist a profile snapshot with the LLM's narrative interpretation.
 
-    Must be called after generate_profile_snapshot. Saves scores, quadrant,
-    spider chart, interpretation, and flow_data to the profile_snapshots table.
-    Also persists Moral Capital (C+) and Moral Debt (C-) to the moral_ledger table.
+    Must be called after generate_profile_snapshot OR generate_reassessment_snapshot.
+    Saves scores, quadrant, spider chart, interpretation, and flow_data to the
+    profile_snapshots table. Also persists Moral Capital (C+) and Moral Debt (C-)
+    to the moral_ledger table.
+
+    Two persistence paths, selected by the presence of a "sentinel" block in the
+    cached profile (both run inside a single DB transaction for atomicity):
+
+    - Baseline path (no sentinel block): seed dimension_assessment_state for ALL
+      13 dimensions at cycle 0 with kind='baseline'. users.reassessment_cycle stays 0.
+    - Reassessment path (sentinel block present): increment users.reassessment_cycle,
+      then upsert dimension_assessment_state for each targeted/sentinel dimension with
+      the new cycle, kind, blended score, and flagged_for_full_reassessment status
+      (cleared for dims no longer flagged).
     """
     cached = _profile_cache.pop(user_id, None)
     if not cached:
         return {"error": "No generated profile found. Call generate_profile_snapshot first."}
 
     snapshot_id = str(uuid.uuid4())
+    sentinel_block = cached.get("sentinel")
+    is_reassessment = sentinel_block is not None
+
+    # Persist the sentinel metadata alongside the quadrant JSON (free-form dict,
+    # extra keys are ignored by quadrant readers) so the snapshot self-describes.
+    quadrant_payload = dict(cached["quadrant"]) if isinstance(cached["quadrant"], dict) else cached["quadrant"]
+    if is_reassessment and isinstance(quadrant_payload, dict):
+        quadrant_payload["sentinel"] = sentinel_block
 
     with get_db_session() as conn:
         # Find previous snapshot for chaining
@@ -763,7 +835,7 @@ def save_profile_snapshot(user_id: str, interpretation: str) -> dict[str, Any]:
                 user_id,
                 session_id,
                 json.dumps(cached["scores"]),
-                json.dumps(cached["quadrant"]),
+                json.dumps(quadrant_payload),
                 cached["spider_chart"],
                 interpretation,
                 prev_id,
@@ -787,6 +859,55 @@ def save_profile_snapshot(user_id: str, interpretation: str) -> dict[str, Any]:
                     datetime.utcnow().isoformat(),
                 ),
             )
+
+        # ── Dimension assessment state tracking (same transaction) ──────────
+        if is_reassessment:
+            # Reassessment path: increment cycle and upsert targeted/sentinel dims.
+            new_cycle = sentinel_block.get("cycle")
+            if new_cycle is None:
+                cycle_row = conn.execute(
+                    "SELECT reassessment_cycle FROM users WHERE id = ?",
+                    (user_id,),
+                ).fetchone()
+                new_cycle = (cycle_row["reassessment_cycle"] if cycle_row else 0) + 1
+
+            conn.execute(
+                "UPDATE users SET reassessment_cycle = ? WHERE id = ?",
+                (new_cycle, user_id),
+            )
+
+            flagged_set = set(sentinel_block.get("flagged_for_full_reassessment", []))
+            targeted = sentinel_block.get("targeted_dimensions", [])
+            sentinel = sentinel_block.get("sentinel_dimensions", [])
+
+            for dim in targeted:
+                _upsert_dimension_assessment_state(
+                    conn, user_id, dim,
+                    last_assessed_cycle=new_cycle,
+                    last_assessment_kind="targeted",
+                    last_score=_dim_score(cached["scores"], dim),
+                    # Targeted dims are not added to the flagged list by the engine,
+                    # so any prior flag on a now-targeted dim is cleared here.
+                    flagged=dim in flagged_set,
+                )
+            for dim in sentinel:
+                _upsert_dimension_assessment_state(
+                    conn, user_id, dim,
+                    last_assessed_cycle=new_cycle,
+                    last_assessment_kind="sentinel",
+                    last_score=_dim_score(cached["scores"], dim),
+                    flagged=dim in flagged_set,
+                )
+        else:
+            # Baseline path: seed all 13 dimensions at cycle 0.
+            for dim in cached["scores"].keys():
+                _upsert_dimension_assessment_state(
+                    conn, user_id, dim,
+                    last_assessed_cycle=0,
+                    last_assessment_kind="baseline",
+                    last_score=_dim_score(cached["scores"], dim),
+                    flagged=False,
+                )
 
     # Build response with all data the frontend profile tab needs
     quadrant_data = cached["quadrant"]
@@ -1845,4 +1966,162 @@ def select_sentinel_questions(
     return {
         "question_ids": all_question_ids,
         "by_dimension": by_dimension,
+    }
+
+
+def generate_reassessment_snapshot(user_id: str) -> dict[str, Any]:
+    """Generate a deterministic blended reassessment snapshot.
+
+    Orchestrates the full reassessment scoring pipeline:
+    1. Load the prior snapshot scores (the carry baseline). No prior → error.
+    2. Load the current assessment_state responses. None → error.
+    3. Determine targeted / sentinel / carried dimensions (select_reassessment_targets).
+    4. Pick extremity-weighted sentinel question IDs (select_sentinel_questions).
+    5. Re-score targeted dims from the full current responses (score_responses).
+    6. Compute the sentinel signal from the sentinel question subset only
+       (score_question_subset).
+    7. Merge fresh signals (targeted → full re-score, sentinel → subset signal) and
+       blend against the prior with compute_sentinel_scores (70/30 default).
+    8. Recompute the quadrant from the BLENDED Transmutation Capacity sub-dimensions.
+    9. Populate _profile_cache[user_id] for save_profile_snapshot to persist.
+
+    The math is fully deterministic; no narrative is generated here. The returned
+    sentinel block carries the per-dimension source/shift metadata and the
+    flagged_for_full_reassessment list for the next cycle.
+
+    Args:
+        user_id: User to reassess. Securely injected via with_user_id.
+
+    Returns:
+        On success:
+            {
+                "event_type": "reassessment.scored",
+                "scores": {dim: {...blended...}},
+                "quadrant": {x, y, archetype, ...},
+                "sentinel": {dimensions, flagged_for_full_reassessment, blend, ...},
+                "current_cycle": int,  # cycle this reassessment will become once saved
+            }
+        On error:
+            {"error": "No prior snapshot found for user."}  or
+            {"error": "No assessment data found for user."}
+    """
+    from agents.transmutation.sentinel_engine import compute_sentinel_scores
+
+    qb = get_question_bank()
+
+    with get_db_session() as conn:
+        prior_row = conn.execute(
+            "SELECT scores FROM profile_snapshots WHERE user_id = ? ORDER BY created_at DESC LIMIT 1",
+            (user_id,),
+        ).fetchone()
+
+        assessment_row = conn.execute(
+            "SELECT responses, scenario_responses FROM assessment_state WHERE user_id = ? ORDER BY created_at DESC LIMIT 1",
+            (user_id,),
+        ).fetchone()
+
+        cycle_row = conn.execute(
+            "SELECT reassessment_cycle FROM users WHERE id = ?",
+            (user_id,),
+        ).fetchone()
+
+    if not prior_row or not prior_row["scores"]:
+        return {"error": "No prior snapshot found for user."}
+
+    if not assessment_row:
+        return {"error": "No assessment data found for user."}
+
+    prior_scores = json.loads(prior_row["scores"] or "{}")
+    if not prior_scores:
+        return {"error": "No prior snapshot found for user."}
+
+    responses = json.loads(assessment_row["responses"] or "{}")
+    scenario_responses = json.loads(assessment_row["scenario_responses"] or "{}")
+
+    # The cycle this reassessment becomes once persisted (current + 1).
+    prior_cycle = cycle_row["reassessment_cycle"] if cycle_row else 0
+    current_cycle = prior_cycle + 1
+
+    # Step 1: Deterministic plan — which dims are targeted vs sentinel vs carried.
+    targets = select_reassessment_targets(user_id)
+    if "error" in targets:
+        return targets
+
+    targeted_dimensions = targets["targeted_dimensions"]
+    sentinel_dimensions = targets["sentinel_dimensions"]
+
+    # Step 2: Sentinel question IDs (extremity-weighted) for the sentinel signal.
+    sentinel_picks = select_sentinel_questions(user_id, sentinel_dimensions)
+    sentinel_question_ids = sentinel_picks["question_ids"]
+
+    # Step 3: Full re-score from current responses (provides targeted fresh scores).
+    full_fresh = score_responses(responses, scenario_responses)
+    targeted_fresh_scores = full_fresh["dimensions"]
+
+    # Step 4: Sentinel signal from only the selected sentinel questions.
+    sentinel_fresh_signal = score_question_subset(responses, sentinel_question_ids, qb)
+
+    # Step 5: Merge fresh signals — targeted dims use the full re-score, sentinel dims
+    # use the lighter subset signal. compute_sentinel_scores reads one fresh dict.
+    merged_fresh: dict[str, Any] = {}
+    for dim in targeted_dimensions:
+        if dim in targeted_fresh_scores:
+            merged_fresh[dim] = targeted_fresh_scores[dim]
+    for dim in sentinel_dimensions:
+        if dim in sentinel_fresh_signal:
+            merged_fresh[dim] = sentinel_fresh_signal[dim]
+
+    # Step 6: Blend prior + fresh deterministically (70/30 for sentinel, 100% for targeted).
+    blended = compute_sentinel_scores(
+        prior_scores,
+        merged_fresh,
+        targeted_dimensions,
+        sentinel_dimensions,
+    )
+    blended_scores = blended["dimensions"]
+
+    # Step 7: Recompute the quadrant from the BLENDED Transmutation Capacity sub-dims.
+    # _calculate_quadrant reads sub_dimensions[*]["score"], which the blended shape
+    # carries, so the quadrant reflects blended (not just fresh) capacity.
+    quadrant = _calculate_quadrant(blended_scores, scenario_responses, qb)
+
+    # Step 8: Build the sentinel metadata block persisted alongside the snapshot.
+    sentinel_block = {
+        "dimensions": {
+            dim: {
+                "source": data["source"],
+                "shift_normalized": data["shift_normalized"],
+                "shift_flagged": data["shift_flagged"],
+            }
+            for dim, data in blended_scores.items()
+        },
+        "flagged_for_full_reassessment": blended["flagged_for_full_reassessment"],
+        "blend": blended["blend"],
+        "shift_threshold_normalized": blended["shift_threshold_normalized"],
+        "targeted_dimensions": targeted_dimensions,
+        "sentinel_dimensions": sentinel_dimensions,
+        "carried_dimensions": targets["carried_dimensions"],
+        "cycle": current_cycle,
+    }
+
+    # Step 9: Generate spider chart from the blended dimension scores.
+    chart_png = generate_spider_chart(blended_scores)
+
+    # Populate the cache for save_profile_snapshot. The presence of "sentinel" routes
+    # save_profile_snapshot down the reassessment persistence path.
+    _profile_cache[user_id] = {
+        "scores": blended_scores,
+        "quadrant": quadrant,
+        "insufficient_dimensions": full_fresh.get("insufficient_dimensions", []),
+        "spider_chart": chart_png,
+        "flow_profile": full_fresh.get("flow_profile"),
+        "sentinel": sentinel_block,
+    }
+
+    return {
+        "event_type": "reassessment.scored",
+        "scores": blended_scores,
+        "quadrant": quadrant,
+        "sentinel": sentinel_block,
+        "current_cycle": current_cycle,
     }
