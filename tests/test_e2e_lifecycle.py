@@ -19,12 +19,14 @@ from agents.transmutation.tools import (
     save_roadmap,
     update_roadmap,
     get_development_roadmap,
+    generate_check_in_snapshot,
     generate_comparison_snapshot,
     evaluate_graduation_readiness,
     generate_graduation_artifacts,
     save_graduation_record,
     get_graduation_record,
     save_check_in_log,
+    detect_check_in_regression,
     advance_phase,
     get_user_profile,
     get_dimension_staleness,
@@ -333,6 +335,105 @@ class TestCheckInJourney:
         )
         assert result["regression_detected"] is True
         assert result["re_entered_development"] is False
+
+    def test_check_in_full_pipeline(self):
+        """Exercise the actual generate→save→compare→detect chain.
+
+        The other tests in this class pre-INSERT canned snapshots and only
+        exercise save_check_in_log — they covered the data, not the path.
+        This one runs the production-shaped flow against the temp SQLite:
+        a graduated user has a real graduation snapshot + assessment_state
+        responses, and we walk the four tools the check-in agent will call.
+
+        Asserts the gap this project fixed: (1) `generate_check_in_snapshot`
+        succeeds; (2) `save_profile_snapshot` returns the new check-in
+        event_type; (3) `generate_comparison_snapshot` against the graduation
+        baseline now sees a different latest snapshot and produces non-zero
+        deltas (was previously always-zero because the latest snapshot WAS
+        the graduation snapshot); (4) `detect_check_in_regression` returns
+        `evaluated: true` (was previously always-false with reason "no
+        check-in snapshot since graduation"); (5) the cycle counter is NOT
+        bumped and dimension_assessment_state is NOT seeded — the check-in
+        path must not disturb development-phase bookkeeping.
+        """
+        uid = _create_user(phase="check_in")
+
+        # The graduated user starts at cycle 2 (had two reassessments during
+        # development before graduating). The check-in must leave this alone.
+        with get_db_session() as conn:
+            conn.execute("UPDATE users SET reassessment_cycle = 2 WHERE id = ?", (uid,))
+
+        # Baseline: the graduation snapshot, 90 days back, scores at 3.0
+        # across the bank so the comparison has somewhere to move.
+        grad_snap_id = _create_profile_snapshot(
+            uid, _baseline_scores(3.0), "transmuter",
+            (datetime.utcnow() - timedelta(days=90)).isoformat(),
+        )
+        with get_db_session() as conn:
+            conn.execute(
+                """INSERT INTO graduation_record
+                   (id, user_id, final_snapshot_id, initial_snapshot_id, practice_map,
+                    pattern_narrative, graduation_indicators, created_at)
+                   VALUES (?, ?, ?, ?, ?, ?, ?, ?)""",
+                (
+                    str(uuid.uuid4()), uid, grad_snap_id, None, "{}",
+                    "graduation narrative", "{}", datetime.utcnow().isoformat(),
+                ),
+            )
+
+        # User completes the check-in by answering every question at 5
+        # (Likert max) — well above the 3.0 baseline. The comparison should
+        # see a uniformly positive delta.
+        _seed_assessment_state(uid, _full_responses(5))
+
+        # DAS row-count baseline (must not change after the check-in path).
+        with get_db_session() as conn:
+            das_before = conn.execute(
+                "SELECT COUNT(*) AS n FROM dimension_assessment_state WHERE user_id = ?",
+                (uid,),
+            ).fetchone()["n"]
+
+        # ── (1) generate the check-in snapshot ─────────────────────────
+        gen = generate_check_in_snapshot(uid)
+        assert "error" not in gen, gen
+        assert gen["event_type"] == "checkin.scored"
+
+        # ── (2) save it — exercises the new save_profile_snapshot branch.
+        saved = save_profile_snapshot(uid, "Simulated 3-month check-in.")
+        assert saved["saved"] is True
+        assert saved["event_type"] == "checkin.snapshot_saved"
+        check_in_snap_id = saved["snapshot_id"]
+        assert check_in_snap_id != grad_snap_id  # a NEW snapshot exists
+
+        # ── (3) compare against graduation — must now see real deltas.
+        comparison = generate_comparison_snapshot(uid, grad_snap_id)
+        assert "error" not in comparison
+        # Pick any dim from the comparison and verify the delta is non-zero
+        # (every dim moved 3.0 → 5.0 on the raw 1–5 scale; 50.0 on the
+        # 0–100 normalized scale).
+        any_delta = next(iter(comparison["deltas"].values()))
+        assert any_delta["delta"] != 0
+        assert any_delta["current"] > any_delta["previous"]
+
+        # ── (4) regression detection — must now run end-to-end.
+        verdict = detect_check_in_regression(uid)
+        assert verdict["evaluated"] is True, verdict
+        # Strict improvement (3.0 → 5.0) → no regression flagged.
+        assert verdict["regression_detected"] is False
+        assert verdict["baseline_snapshot_id"] == grad_snap_id
+        assert verdict["check_in_snapshot_id"] == check_in_snap_id
+
+        # ── (5) bookkeeping invariants: cycle untouched, no DAS rows added.
+        with get_db_session() as conn:
+            cycle_row = conn.execute(
+                "SELECT reassessment_cycle FROM users WHERE id = ?", (uid,)
+            ).fetchone()
+            das_after = conn.execute(
+                "SELECT COUNT(*) AS n FROM dimension_assessment_state WHERE user_id = ?",
+                (uid,),
+            ).fetchone()["n"]
+        assert cycle_row["reassessment_cycle"] == 2  # unchanged
+        assert das_after == das_before  # no rows added
 
 
 # ── Full Lifecycle Journey ──────────────────────────────
