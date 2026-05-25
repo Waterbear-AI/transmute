@@ -554,6 +554,94 @@ class TestResultsAPIJourney:
         assert data["development"]["practice_count"] == 1
         assert len(data["profiles"]) >= 1
 
+    def test_check_in_regression_detail_in_results_after_lifecycle(
+        self, authenticated_client
+    ):
+        """Graduated-user journey: after a check-in, /api/results surfaces
+        latest_regression_detail.evaluated==true and latest_comparison.deltas.
+
+        Per spec B13.2 (lifecycle e2e criterion): asserts that after a seeded
+        check-in, the API response's check_ins block carries the deterministic
+        regression verdict via the new fields.
+        """
+        uid = authenticated_client.user_id
+
+        # ── Step 1: Create graduation baseline snapshot (transmuter, high scores) ──
+        baseline_ts = (datetime.utcnow() - timedelta(days=30)).isoformat()
+        baseline_scores = {"dim1": {"score": 4.0}, "dim2": {"score": 4.5}}
+        baseline_id = _create_profile_snapshot(
+            uid, baseline_scores, "transmuter", baseline_ts
+        )
+
+        # Save a graduation record — final_snapshot_id will point to baseline_id
+        # (it is the only/most-recent snapshot at this point).
+        indicators = {
+            "pattern_stability": {"met": True},
+            "quadrant_consolidation": {"met": True},
+        }
+        grad_result = save_graduation_record(uid, "Growth story.", indicators)
+        assert grad_result["saved"] is True
+
+        # Confirm graduation baseline was set correctly
+        record = get_graduation_record(uid)
+        assert record["exists"] is True
+        assert record["final_snapshot_id"] == baseline_id
+
+        # ── Step 2: Create a later check-in snapshot (still transmuter, similar scores) ──
+        # Scores chosen so regression is NOT triggered (all drops < 15 pts):
+        #   dim1: normalize(4.0)=75 → normalize(3.5)=62.5, drop=12.5 < 15 → ok
+        #   dim2: normalize(4.5)=87.5 → normalize(4.1)=77.5, drop=10.0 < 15 → ok
+        checkin_scores = {"dim1": {"score": 3.5}, "dim2": {"score": 4.1}}
+        checkin_id = _create_profile_snapshot(uid, checkin_scores, "transmuter")
+
+        # Seed the check_in_log row (regression_detected=False matches the scores above)
+        with get_db_session() as conn:
+            conn.execute(
+                "INSERT INTO check_in_log "
+                "(id, user_id, snapshot_id, graduation_snapshot_id, regression_detected, created_at) "
+                "VALUES (?, ?, ?, ?, ?, ?)",
+                (
+                    str(uuid.uuid4()),
+                    uid,
+                    checkin_id,
+                    baseline_id,
+                    False,
+                    datetime.utcnow().isoformat(),
+                ),
+            )
+
+        # ── Step 3: Fetch /api/results and assert new fields ──
+        resp = authenticated_client.get(f"/api/results/{uid}")
+        assert resp.status_code == 200
+        data = resp.json()
+
+        ci = data["check_ins"]
+        assert ci["count"] == 1
+
+        # Spec criterion: latest_regression_detail.evaluated == true
+        detail = ci["latest_regression_detail"]
+        assert detail is not None, "latest_regression_detail must be populated after check-in"
+        assert detail["evaluated"] is True, "evaluated must be True when baseline + check-in exist"
+        assert detail["regression_detected"] is False  # scores within threshold
+        assert detail["regressed_dimensions"] == []
+        assert detail["quadrant"]["downgraded"] is False
+        assert detail["threshold_normalized"] == 15.0
+
+        # latest_comparison must be populated (baseline_id != checkin_id)
+        comp = ci["latest_comparison"]
+        assert comp is not None, "latest_comparison must be populated when snapshots differ"
+        assert len(comp["deltas"]) > 0
+        for dim, delta in comp["deltas"].items():
+            assert "previous_normalized" in delta
+            assert "current_normalized" in delta
+            assert "delta_normalized" in delta
+            assert delta["direction"] in ("up", "down", "stable")
+        assert "quadrant_shift" in comp
+
+        # Backward-compat: latest_regression boolean still present
+        assert "latest_regression" in ci
+        assert ci["latest_regression"] is False
+
 
 # ── Deterministic Sentinel Reassessment Journey ──────────────────────────────
 
