@@ -74,6 +74,13 @@ ARCHETYPE_RANK = {
     "transmuter": 3,
 }
 
+# Cache marker that routes save_profile_snapshot into the check-in
+# persistence branch (no dimension_assessment_state seeding, no
+# reassessment_cycle bump). Set by generate_check_in_snapshot; read by
+# save_profile_snapshot. A single named constant keeps producer and
+# consumer in sync — never re-type the literal "check_in" at call sites.
+SNAPSHOT_KIND_CHECK_IN = "check_in"
+
 
 def _snapshot_archetype(placement: dict) -> str:
     """Read the archetype from a stored quadrant_placement dict.
@@ -2119,6 +2126,124 @@ def detect_check_in_regression(user_id: str) -> dict[str, Any]:
         "baseline_snapshot_id": baseline_id,
         "check_in_snapshot_id": check_in_id,
     }
+
+
+def generate_check_in_snapshot(user_id: str) -> dict[str, Any]:
+    """Deterministically score a post-graduation check-in reassessment.
+
+    Mirrors `generate_profile_snapshot` (full-13-dim scoring + quadrant +
+    optional flow profile), but pre-checks the graduation baseline and tags
+    the cached payload with `kind=SNAPSHOT_KIND_CHECK_IN` so the matching
+    `save_profile_snapshot` branch persists the snapshot without seeding
+    `dimension_assessment_state` (baseline behaviour) and without bumping
+    `users.reassessment_cycle` (sentinel-reassessment behaviour). No LLM call.
+
+    Call this in the check-in flow AFTER the user has answered all 13
+    dimensions (assessment_state populated) and BEFORE
+    `save_profile_snapshot`. Do not call any other `generate_*` tool between
+    this and the save — `_profile_cache` is single-slot per user.
+
+    Args:
+        user_id: User performing the check-in. Securely injected via
+            `with_user_id`; never accepted from the LLM.
+
+    Returns:
+        On success:
+            {
+                "event_type": "checkin.scored",
+                "scores": {dim: {...}, ...},
+                "quadrant": {"archetype": ..., ...},
+                "insufficient_dimensions": [...],
+                "has_spider_chart": True,
+                "flow_data": <serialized MoralProfile if available>,  # optional
+            }
+        On missing precondition (one of three; the LLM must narrate and stop):
+            {"error": "No assessment data found for user."}
+            {"error": "No graduation record found."}
+            {"error": "No graduation baseline snapshot found."}
+    """
+    with get_db_session() as conn:
+        row = conn.execute(
+            "SELECT responses, scenario_responses FROM assessment_state "
+            "WHERE user_id = ? ORDER BY created_at DESC LIMIT 1",
+            (user_id,),
+        ).fetchone()
+
+    if not row:
+        logger.warning("check_in_snapshot: no assessment_state for user=%s", user_id)
+        return {"error": "No assessment data found for user."}
+
+    responses = json.loads(row["responses"] or "{}")
+    scenario_responses = json.loads(row["scenario_responses"] or "{}")
+
+    # Empty responses are treated identically to a missing row — the LLM
+    # narrates "we don't have your responses yet" in both cases (PD-4).
+    if not responses:
+        logger.warning(
+            "check_in_snapshot: assessment_state.responses empty for user=%s",
+            user_id,
+        )
+        return {"error": "No assessment data found for user."}
+
+    # Baseline precondition: a graduation record must exist with a
+    # final_snapshot_id that resolves to an actual profile_snapshots row.
+    # Without it, generate_comparison_snapshot and detect_check_in_regression
+    # have no baseline to compare against, so the check-in is meaningless.
+    grad = get_graduation_record(user_id)
+    if not grad.get("exists"):
+        logger.warning("check_in_snapshot: no graduation_record for user=%s", user_id)
+        return {"error": "No graduation record found."}
+
+    baseline_id = grad.get("final_snapshot_id")
+    if not baseline_id:
+        logger.warning(
+            "check_in_snapshot: graduation_record has no final_snapshot_id for user=%s",
+            user_id,
+        )
+        return {"error": "No graduation baseline snapshot found."}
+
+    with get_db_session() as conn:
+        baseline_row = conn.execute(
+            "SELECT id FROM profile_snapshots WHERE id = ? AND user_id = ?",
+            (baseline_id, user_id),
+        ).fetchone()
+
+    if not baseline_row:
+        logger.warning(
+            "check_in_snapshot: baseline snapshot %s missing for user=%s",
+            baseline_id, user_id,
+        )
+        return {"error": "No graduation baseline snapshot found."}
+
+    # Deterministic scoring (same path baseline + reassessment use).
+    result = score_responses(responses, scenario_responses)
+    chart_png = generate_spider_chart(result["dimensions"])
+    flow_profile = result.get("flow_profile")
+
+    # Stage to the single-slot cache for save_profile_snapshot to persist.
+    # The "kind" marker routes save_profile_snapshot into the check-in
+    # branch (skips DAS seeding AND reassessment_cycle bump).
+    _profile_cache[user_id] = {
+        "scores": result["dimensions"],
+        "quadrant": result["quadrant"],
+        "insufficient_dimensions": result["insufficient_dimensions"],
+        "spider_chart": chart_png,
+        "flow_profile": flow_profile,
+        "kind": SNAPSHOT_KIND_CHECK_IN,
+    }
+
+    logger.info("check_in_snapshot: scored user=%s baseline=%s", user_id, baseline_id)
+
+    response: dict[str, Any] = {
+        "event_type": "checkin.scored",
+        "scores": result["dimensions"],
+        "quadrant": result["quadrant"],
+        "insufficient_dimensions": result["insufficient_dimensions"],
+        "has_spider_chart": True,
+    }
+    if flow_profile:
+        response["flow_data"] = flow_profile.model_dump()
+    return response
 
 
 # ── Reassessment selection tools ───────────────────────────────────────
