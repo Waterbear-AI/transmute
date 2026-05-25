@@ -71,6 +71,56 @@ const Chat = (() => {
     }
 
     /**
+     * Trigger the agent's first turn without a user message.
+     * Used by Sessions.activate() when a session loads with empty history
+     * so the agent greets automatically (signup, new "New" sessions).
+     * Mirrors sendMessage but does NOT render a user message, does NOT
+     * disable the input, and posts no body to /api/chat/{id}/start.
+     */
+    async function startSession(sessionId) {
+        if (_isReadOnly) return;
+        if (_abortController) _abortController.abort();
+        _abortController = new AbortController();
+
+        _showThinkingIndicator();
+
+        const timeoutWarning = setTimeout(() => {
+            Toast.show('Still waiting for a response... this is taking longer than usual.', 'warning');
+        }, 15000);
+
+        try {
+            const res = await fetch('/api/chat/' + encodeURIComponent(sessionId) + '/start', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({}),
+                signal: _abortController.signal
+            });
+
+            if (!res.ok) {
+                const err = await res.json().catch(() => ({}));
+                const errMsg = err.detail || 'Could not start conversation';
+                _appendSystemMessage('Error: ' + errMsg);
+                Toast.show(errMsg, 'error', {
+                    onRetry: () => startSession(sessionId)
+                });
+                return;
+            }
+
+            await _parseSSEStream(res.body);
+        } catch (err) {
+            if (err.name !== 'AbortError') {
+                _appendSystemMessage('Connection error: ' + err.message);
+                Toast.show('Connection error: ' + err.message, 'error', {
+                    onRetry: () => startSession(sessionId)
+                });
+            }
+        } finally {
+            clearTimeout(timeoutWarning);
+            _abortController = null;
+        }
+    }
+
+    /**
      * Send a message and stream the SSE response.
      */
     async function sendMessage(sessionId, message) {
@@ -497,6 +547,7 @@ const Chat = (() => {
         setReadOnly,
         clear,
         sendMessage,
+        startSession,
         renderHistory,
         appendSystemMessage: _appendSystemMessage
     };

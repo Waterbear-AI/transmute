@@ -69,6 +69,11 @@ const Sessions = (() => {
                 const data = await res.json();
                 if (data.messages && data.messages.length > 0) {
                     Chat.renderHistory(data.messages, data.answered_responses || {});
+                } else if (!isArchived) {
+                    // Fresh session with no history — trigger the agent's
+                    // first turn so the user sees a greeting without having
+                    // to type. Fire-and-forget; SSE handlers manage rendering.
+                    Chat.startSession(sessionId);
                 }
             }
         } catch (err) {

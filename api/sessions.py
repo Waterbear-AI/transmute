@@ -217,7 +217,10 @@ async def get_session_history(
                         text = part["text"]
                         msg_role = "user" if role == "user" else "agent"
                         # Filter out automated batch_complete JSON messages
+                        # and the auto-greet seed (server-internal, never shown).
                         if msg_role == "user":
+                            if text.startswith("[session_start]"):
+                                continue
                             try:
                                 parsed = json.loads(text)
                                 if isinstance(parsed, dict) and parsed.get("type") == "batch_complete":

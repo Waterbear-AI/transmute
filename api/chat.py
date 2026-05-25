@@ -64,6 +64,18 @@ class ChatRequest(BaseModel):
     message: str
 
 
+# Synthetic seed sent as the new_message when the agent's first turn is
+# triggered without a user message (POST /api/chat/{session_id}/start).
+# Stored as a module constant so call sites and the history-render filter
+# (api/sessions.py::get_session_history) stay in sync. The bracketed prefix
+# is what the history filter matches on — preserve it if the wording changes.
+AGENT_SESSION_START_SEED = (
+    "[session_start] The user has just entered the chat. Greet them per the "
+    "instructions for their current phase, and do not wait for them to send a "
+    "message first."
+)
+
+
 def _sse_event(event_type: str, data: dict) -> str:
     """Format a dict as an SSE event string."""
     return f"event: {event_type}\ndata: {json.dumps(data)}\n\n"
@@ -175,6 +187,42 @@ def _estimate_cost(input_tokens: int, output_tokens: int) -> float:
     input_cost = (input_tokens / 1_000_000) * cost.input
     output_cost = (output_tokens / 1_000_000) * cost.output
     return input_cost + output_cost
+
+
+@router.post("/{session_id}/start")
+@limiter.limit("30/minute")
+async def chat_start(
+    request: Request,
+    session_id: str,
+    user_id: str = Depends(get_current_user_id),
+):
+    """Trigger the agent's first turn without a user message.
+
+    Used by the frontend on signup or any fresh "New" session where the
+    chat history is empty — fires the agent's phase-appropriate greeting
+    so users do not have to send the first message themselves. The seed
+    string (AGENT_SESSION_START_SEED) is persisted in the session events
+    by ADK and filtered out at history-render time by
+    api/sessions.py::get_session_history.
+    """
+    session = await _session_service.get_session(
+        app_name="transmutation",
+        user_id=user_id,
+        session_id=session_id,
+    )
+    if not session:
+        raise HTTPException(status_code=404, detail="Session not found")
+
+    logger.info("auto-greet triggered for session %s", session_id)
+    return StreamingResponse(
+        _stream_agent_response(user_id, session_id, AGENT_SESSION_START_SEED),
+        media_type="text/event-stream",
+        headers={
+            "Cache-Control": "no-cache",
+            "Connection": "keep-alive",
+            "X-Accel-Buffering": "no",
+        },
+    )
 
 
 @router.post("/{session_id}")
