@@ -992,6 +992,60 @@ body {
     }
 }
 
+/* ── Regression Panel ─────────────────────── */
+
+.regression-panel {
+    border-left: 3px solid var(--color-warning);
+    padding: 8px 12px;
+    margin: 12px 0;
+    background: var(--color-surface);
+    border-radius: 0 4px 4px 0;
+}
+
+.regression-panel--clean {
+    border-left-color: var(--color-success);
+}
+
+.regression-panel--unavailable {
+    border-left-color: var(--color-text-muted);
+}
+
+.regression-panel__title {
+    font-size: 14px;
+    font-weight: 600;
+    margin-bottom: 8px;
+}
+
+.regression-panel__dim-list {
+    list-style: none;
+    margin: 0 0 8px 0;
+    padding: 0;
+}
+
+.regression-panel__dim {
+    padding: 4px 0;
+    font-size: 14px;
+    color: var(--color-error);
+}
+
+.regression-panel__quadrant-downgrade {
+    margin: 8px 0;
+    font-weight: 600;
+    color: var(--color-warning);
+}
+
+.regression-panel__threshold {
+    font-size: 13px;
+    color: var(--color-text-muted);
+    margin: 6px 0 2px 0;
+}
+
+.regression-panel__reason {
+    font-size: 13px;
+    color: var(--color-text-muted);
+    margin: 2px 0;
+}
+
 /* ── Toast Notifications ───────────────────── */
 
 .toast-container {

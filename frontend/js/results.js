@@ -120,6 +120,19 @@ const Results = (() => {
                 _resultsData.comparison_snapshots = data;
                 if (_activeTab === 'reassessment') _renderTabContent('reassessment');
                 _renderTabs();
+                // Re-fetch full results to get rich regression detail (not in SSE payload)
+                if (_userId) {
+                    fetch('/api/results/' + encodeURIComponent(_userId))
+                        .then(r => r.ok ? r.json() : null)
+                        .then(results => {
+                            if (results && results.check_ins && results.check_ins.count > 0) {
+                                _resultsData.comparison_snapshots = results.check_ins;
+                                if (_activeTab === 'reassessment') _renderTabContent('reassessment');
+                                _renderTabs();
+                            }
+                        })
+                        .catch(() => {});
+                }
                 break;
         }
     }
@@ -547,25 +560,134 @@ const Results = (() => {
             }
         }
 
+        // NEW: Render detailed regression panel (between date line and comparison charts)
+        _renderRegressionDetail(el, data.latest_regression_detail || null);
+
+        // Prefer latest_comparison (API shape) over SSE-direct comparison data
+        const compData = data.latest_comparison || null;
+
         // Side-by-side spider chart comparison
-        const prev = data.previous_snapshot || data.previous;
-        const curr = data.current_snapshot || data.current;
+        const prev = (compData && compData.previous_snapshot) || data.previous_snapshot || data.previous;
+        const curr = (compData && compData.current_snapshot) || data.current_snapshot || data.current;
         if (prev || curr) {
             _renderComparisonCharts(el, prev, curr);
         }
 
-        // Delta indicators
-        if (data.deltas) {
-            _renderComparisonDeltas(el, data.deltas);
+        // Delta indicators \u2014 prefer latest_comparison.deltas over top-level deltas
+        const deltas = (compData && compData.deltas) || data.deltas;
+        if (deltas) {
+            _renderComparisonDeltas(el, deltas);
         }
 
-        // Quadrant shift indicator
-        if (data.quadrant_shift && data.quadrant_shift.shifted) {
+        // Quadrant shift indicator \u2014 prefer latest_comparison.quadrant_shift
+        const quadrantShift = (compData && compData.quadrant_shift) || data.quadrant_shift;
+        if (quadrantShift && quadrantShift.shifted) {
             const shiftEl = document.createElement('div');
             shiftEl.className = 'comparison-shift';
-            Sanitize.setText(shiftEl, 'Quadrant shift: ' + (data.quadrant_shift.from || '?') + ' \u2192 ' + (data.quadrant_shift.to || '?'));
+            const fromQ = quadrantShift.previous || quadrantShift.from || '?';
+            const toQ = quadrantShift.current || quadrantShift.to || '?';
+            Sanitize.setText(shiftEl, 'Quadrant shift: ' + fromQ + ' \u2192 ' + toQ);
             el.appendChild(shiftEl);
         }
+    }
+
+    /**
+     * Render regression detail panel in one of four states.
+     * @param {Element} el - Parent element (Reassessment tab container)
+     * @param {Object|null} detail - latest_regression_detail from API, or null
+     */
+    function _renderRegressionDetail(el, detail) {
+        // State 1: No check-in yet / detail not available \u2014 no-op (defensive guard)
+        if (!detail) return;
+
+        // State 2: Not evaluated (no graduation baseline or no new check-in)
+        if (detail.evaluated === false) {
+            const section = document.createElement('section');
+            section.className = 'regression-panel regression-panel--unavailable';
+            section.setAttribute('role', 'status');
+            section.setAttribute('aria-live', 'polite');
+            const line = document.createElement('p');
+            line.style.margin = '0';
+            Sanitize.setText(line, 'Regression comparison unavailable \u2014 ' + (detail.reason || 'no baseline available'));
+            section.appendChild(line);
+            el.appendChild(section);
+            return;
+        }
+
+        // State 3: Regression detected
+        if (detail.regression_detected === true) {
+            const section = document.createElement('section');
+            section.className = 'regression-panel';
+            section.setAttribute('role', 'status');
+            section.setAttribute('aria-live', 'polite');
+
+            const title = document.createElement('div');
+            title.className = 'regression-panel__title';
+            Sanitize.setText(title, 'Regression Detail');
+            section.appendChild(title);
+
+            if (detail.regressed_dimensions && detail.regressed_dimensions.length > 0) {
+                const intro = document.createElement('p');
+                intro.style.margin = '0 0 6px 0';
+                intro.style.fontSize = '14px';
+                Sanitize.setText(intro, 'Areas that have slipped since graduation:');
+                section.appendChild(intro);
+
+                const ul = document.createElement('ul');
+                ul.className = 'regression-panel__dim-list';
+                for (const dim of detail.regressed_dimensions) {
+                    const li = document.createElement('li');
+                    li.className = 'regression-panel__dim';
+                    const drop = Number(dim.drop_normalized).toFixed(1);
+                    const baseline = Number(dim.baseline_normalized).toFixed(1);
+                    const current = Number(dim.current_normalized).toFixed(1);
+                    Sanitize.setText(li, '\u25bc ' + dim.dimension + '  \u2212' + drop + ' pts (' + baseline + ' \u2192 ' + current + ')');
+                    ul.appendChild(li);
+                }
+                section.appendChild(ul);
+            }
+
+            if (detail.quadrant && detail.quadrant.downgraded) {
+                const qdiv = document.createElement('div');
+                qdiv.className = 'regression-panel__quadrant-downgrade';
+                qdiv.setAttribute('aria-label', 'Quadrant downgraded from ' + detail.quadrant.baseline + ' to ' + detail.quadrant.current);
+                Sanitize.setText(qdiv, 'Quadrant: ' + detail.quadrant.baseline + ' \u25be ' + detail.quadrant.current + ' (downgraded)');
+                section.appendChild(qdiv);
+            }
+
+            const threshold = document.createElement('p');
+            threshold.className = 'regression-panel__threshold';
+            Sanitize.setText(threshold, 'Threshold: dimensions dropping > ' + Number(detail.threshold_normalized).toFixed(0) + ' pts on the 0\u2013100 scale count as regression.');
+            section.appendChild(threshold);
+
+            if (detail.reason) {
+                const reason = document.createElement('p');
+                reason.className = 'regression-panel__reason';
+                Sanitize.setText(reason, detail.reason);
+                section.appendChild(reason);
+            }
+
+            el.appendChild(section);
+            return;
+        }
+
+        // State 4: No regression
+        const section = document.createElement('section');
+        section.className = 'regression-panel regression-panel--clean';
+        section.setAttribute('role', 'status');
+        section.setAttribute('aria-live', 'polite');
+
+        const headline = document.createElement('p');
+        headline.style.margin = '0 0 6px 0';
+        Sanitize.setText(headline, 'No regression detected \u2014 all dimensions within threshold and no quadrant downgrade.');
+        section.appendChild(headline);
+
+        const threshold = document.createElement('p');
+        threshold.className = 'regression-panel__threshold';
+        Sanitize.setText(threshold, 'Threshold: dimensions dropping > ' + Number(detail.threshold_normalized).toFixed(0) + ' pts on the 0\u2013100 scale count as regression.');
+        section.appendChild(threshold);
+
+        el.appendChild(section);
     }
 
     function _renderComparisonCharts(el, prev, curr) {

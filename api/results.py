@@ -10,6 +10,7 @@ from typing import Any, Optional
 from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel
 
+from agents.transmutation.tools import detect_check_in_regression, generate_comparison_snapshot
 from api.auth import get_current_user_id
 from db.database import get_db_session
 
@@ -59,10 +60,62 @@ class GraduationResponse(BaseModel):
     created_at: Optional[str] = None
 
 
+class CheckInQuadrantDetail(BaseModel):
+    baseline: str
+    current: str
+    downgraded: bool
+
+
+class CheckInRegressedDimension(BaseModel):
+    dimension: str
+    baseline_normalized: float
+    current_normalized: float
+    drop_normalized: float
+
+
+class CheckInRegressionDetail(BaseModel):
+    evaluated: bool
+    regression_detected: bool
+    reason: str
+    threshold_normalized: float
+    regressed_dimensions: list[CheckInRegressedDimension]
+    quadrant: CheckInQuadrantDetail
+    baseline_snapshot_id: Optional[str] = None
+    check_in_snapshot_id: Optional[str] = None
+
+
+class CheckInComparisonDelta(BaseModel):
+    previous: float
+    current: float
+    delta: float
+    previous_normalized: float
+    current_normalized: float
+    delta_normalized: float
+    direction: str  # "up" | "down" | "stable"
+
+
+class CheckInQuadrantShift(BaseModel):
+    previous: str
+    current: str
+    shifted: bool
+
+
+class CheckInComparison(BaseModel):
+    current_snapshot_id: str
+    previous_snapshot_id: str
+    deltas: dict[str, CheckInComparisonDelta]
+    quadrant_shift: CheckInQuadrantShift
+    current_created_at: Optional[str] = None
+    previous_created_at: Optional[str] = None
+    # flow_deltas intentionally omitted from v1 surface (out-of-scope per spec B14)
+
+
 class CheckInResponse(BaseModel):
     count: int = 0
-    latest_regression: Optional[bool] = None
-    latest_created_at: Optional[str] = None
+    latest_regression: Optional[bool] = None             # EXISTING — unchanged
+    latest_created_at: Optional[str] = None              # EXISTING — unchanged
+    latest_regression_detail: Optional[CheckInRegressionDetail] = None  # NEW
+    latest_comparison: Optional[CheckInComparison] = None               # NEW
 
 
 class ResultsResponse(BaseModel):
@@ -203,7 +256,7 @@ def get_results(
 
         # Get graduation record
         grad_row = conn.execute(
-            "SELECT pattern_narrative, graduation_indicators, created_at FROM graduation_record WHERE user_id = ? ORDER BY created_at DESC LIMIT 1",
+            "SELECT final_snapshot_id, pattern_narrative, graduation_indicators, created_at FROM graduation_record WHERE user_id = ? ORDER BY created_at DESC LIMIT 1",
             (user_id,),
         ).fetchone()
 
@@ -230,6 +283,69 @@ def get_results(
             latest_regression=latest_checkin["regression_detected"] if latest_checkin else None,
             latest_created_at=latest_checkin["created_at"] if latest_checkin else None,
         )
+
+        # Capture for use outside the db session context
+        final_snapshot_id = grad_row["final_snapshot_id"] if grad_row else None
+        latest_profile_id = profiles[0].id if profiles else None
+
+    # Recompute regression detail when at least one check-in exists (outside db session)
+    if check_ins.count > 0:
+        try:
+            verdict = detect_check_in_regression(user_id)
+            regressed_dims = [
+                CheckInRegressedDimension(**d)
+                for d in (verdict.get("regressed_dimensions") or [])
+            ]
+            quadrant_raw = verdict.get("quadrant") or {}
+            check_ins.latest_regression_detail = CheckInRegressionDetail(
+                evaluated=verdict["evaluated"],
+                regression_detected=verdict["regression_detected"],
+                reason=verdict.get("reason", ""),
+                threshold_normalized=verdict.get("threshold_normalized", 0.0),
+                regressed_dimensions=regressed_dims,
+                quadrant=CheckInQuadrantDetail(
+                    baseline=quadrant_raw.get("baseline", ""),
+                    current=quadrant_raw.get("current", ""),
+                    downgraded=quadrant_raw.get("downgraded", False),
+                ),
+                baseline_snapshot_id=verdict.get("baseline_snapshot_id"),
+                check_in_snapshot_id=verdict.get("check_in_snapshot_id"),
+            )
+        except Exception as exc:
+            logger.warning(
+                "check-in regression detail recompute failed for user %s: %s",
+                user_id, exc, exc_info=True,
+            )
+            check_ins.latest_regression_detail = None
+
+    # Recompute comparison snapshot when graduation baseline exists and latest snapshot differs
+    if final_snapshot_id and latest_profile_id and latest_profile_id != final_snapshot_id:
+        try:
+            comp = generate_comparison_snapshot(user_id, final_snapshot_id)
+            deltas_raw = comp.get("deltas") or {}
+            deltas = {
+                dim: CheckInComparisonDelta(**delta_data)
+                for dim, delta_data in deltas_raw.items()
+            }
+            qs_raw = comp.get("quadrant_shift") or {}
+            check_ins.latest_comparison = CheckInComparison(
+                current_snapshot_id=comp["current_snapshot_id"],
+                previous_snapshot_id=comp["previous_snapshot_id"],
+                deltas=deltas,
+                quadrant_shift=CheckInQuadrantShift(
+                    previous=qs_raw.get("previous", ""),
+                    current=qs_raw.get("current", ""),
+                    shifted=qs_raw.get("shifted", False),
+                ),
+                current_created_at=comp.get("current_created_at"),
+                previous_created_at=comp.get("previous_created_at"),
+            )
+        except Exception as exc:
+            logger.warning(
+                "check-in comparison snapshot recompute failed for user %s: %s",
+                user_id, exc, exc_info=True,
+            )
+            check_ins.latest_comparison = None
 
     return ResultsResponse(
         user_id=user_id,
