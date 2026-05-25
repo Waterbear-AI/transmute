@@ -838,20 +838,28 @@ def _dim_score(scores: dict, dim: str) -> Optional[float]:
 def save_profile_snapshot(user_id: str, interpretation: str) -> dict[str, Any]:
     """Persist a profile snapshot with the LLM's narrative interpretation.
 
-    Must be called after generate_profile_snapshot OR generate_reassessment_snapshot.
-    Saves scores, quadrant, spider chart, interpretation, and flow_data to the
-    profile_snapshots table. Also persists Moral Capital (C+) and Moral Debt (C-)
-    to the moral_ledger table.
+    Must be called after generate_profile_snapshot, generate_reassessment_snapshot,
+    or generate_check_in_snapshot. Saves scores, quadrant, spider chart,
+    interpretation, and flow_data to the profile_snapshots table. Also persists
+    Moral Capital (C+) and Moral Debt (C-) to the moral_ledger table.
 
-    Two persistence paths, selected by the presence of a "sentinel" block in the
-    cached profile (both run inside a single DB transaction for atomicity):
+    Three persistence paths, selected by markers on the cached profile (all
+    run inside a single DB transaction for atomicity):
 
-    - Baseline path (no sentinel block): seed dimension_assessment_state for ALL
-      13 dimensions at cycle 0 with kind='baseline'. users.reassessment_cycle stays 0.
+    - Check-in path (kind == SNAPSHOT_KIND_CHECK_IN): persist snapshot +
+      moral_ledger only. Explicitly does NOT seed dimension_assessment_state
+      and does NOT increment users.reassessment_cycle — post-graduation
+      check-ins must not disturb the development-phase cycle counter.
     - Reassessment path (sentinel block present): increment users.reassessment_cycle,
       then upsert dimension_assessment_state for each targeted/sentinel dimension with
       the new cycle, kind, blended score, and flagged_for_full_reassessment status
       (cleared for dims no longer flagged).
+    - Baseline path (neither marker): seed dimension_assessment_state for ALL
+      13 dimensions at cycle 0 with kind='baseline'. users.reassessment_cycle stays 0.
+
+    Branch precedence is check-in → reassessment → baseline. In practice
+    `sentinel` and `kind` never co-occur (each generate_* helper sets only its
+    own marker); the explicit ordering makes precedence audit-able.
     """
     cached = _profile_cache.pop(user_id, None)
     if not cached:
@@ -860,12 +868,17 @@ def save_profile_snapshot(user_id: str, interpretation: str) -> dict[str, Any]:
     snapshot_id = str(uuid.uuid4())
     sentinel_block = cached.get("sentinel")
     is_reassessment = sentinel_block is not None
+    is_check_in = cached.get("kind") == SNAPSHOT_KIND_CHECK_IN
 
-    # Persist the sentinel metadata alongside the quadrant JSON (free-form dict,
-    # extra keys are ignored by quadrant readers) so the snapshot self-describes.
+    # Persist branch metadata alongside the quadrant JSON (free-form dict,
+    # extra keys are ignored by quadrant readers) so the snapshot self-describes
+    # which path produced it.
     quadrant_payload = dict(cached["quadrant"]) if isinstance(cached["quadrant"], dict) else cached["quadrant"]
-    if is_reassessment and isinstance(quadrant_payload, dict):
-        quadrant_payload["sentinel"] = sentinel_block
+    if isinstance(quadrant_payload, dict):
+        if is_check_in:
+            quadrant_payload["kind"] = SNAPSHOT_KIND_CHECK_IN
+        elif is_reassessment:
+            quadrant_payload["sentinel"] = sentinel_block
 
     with get_db_session() as conn:
         # Find previous snapshot for chaining
@@ -921,7 +934,15 @@ def save_profile_snapshot(user_id: str, interpretation: str) -> dict[str, Any]:
             )
 
         # ── Dimension assessment state tracking (same transaction) ──────────
-        if is_reassessment:
+        if is_check_in:
+            # Check-in path: snapshot + moral_ledger only.
+            # NO dimension_assessment_state writes (would clobber development
+            # cycle history); NO users.reassessment_cycle bump (cycle counter
+            # tracks development-phase reassessments, not post-graduation
+            # check-ins). The snapshot row above + moral_ledger row above are
+            # the entirety of the persisted state for this branch.
+            pass
+        elif is_reassessment:
             # Reassessment path: increment cycle and upsert targeted/sentinel dims.
             new_cycle = sentinel_block.get("cycle")
             if new_cycle is None:
@@ -974,7 +995,7 @@ def save_profile_snapshot(user_id: str, interpretation: str) -> dict[str, Any]:
     quadrant_name = quadrant_data.get("quadrant", "Unknown") if isinstance(quadrant_data, dict) else str(quadrant_data)
 
     response: dict[str, Any] = {
-        "event_type": "profile.snapshot",
+        "event_type": "checkin.snapshot_saved" if is_check_in else "profile.snapshot",
         "saved": True,
         "snapshot_id": snapshot_id,
         "scores": cached["scores"],
