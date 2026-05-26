@@ -72,16 +72,37 @@ const LikertCard = (() => {
         const container = document.createElement('div');
         container.className = 'likert-question';
 
-        const textEl = document.createElement('div');
+        // Header is a button so it's keyboard-toggleable (Enter/Space) and
+        // exposes aria-expanded to screen readers. Once a question has been
+        // answered, clicking the header toggles the scale's visibility.
+        const header = document.createElement('button');
+        header.type = 'button';
+        header.className = 'likert-question__header';
+        header.setAttribute('aria-expanded', 'true');
+
+        const chevron = document.createElement('span');
+        chevron.className = 'likert-question__chevron';
+        chevron.setAttribute('aria-hidden', 'true');
+        chevron.textContent = '\u25be'; // \u25be
+        header.appendChild(chevron);
+
+        const textEl = document.createElement('span');
         textEl.className = 'likert-question__text';
         Sanitize.setText(textEl, question.text);
-        container.appendChild(textEl);
+        header.appendChild(textEl);
 
         const checkEl = document.createElement('span');
         checkEl.className = 'likert-question__check';
         checkEl.hidden = true;
         checkEl.textContent = '\u2713';
-        textEl.appendChild(checkEl);
+        header.appendChild(checkEl);
+
+        const selectedLabelEl = document.createElement('span');
+        selectedLabelEl.className = 'likert-question__selected-label';
+        selectedLabelEl.hidden = true;
+        header.appendChild(selectedLabelEl);
+
+        container.appendChild(header);
 
         const scale = document.createElement('div');
         scale.className = 'likert-scale';
@@ -89,6 +110,26 @@ const LikertCard = (() => {
         scale.setAttribute('aria-label', question.text);
 
         const labels = question.scale_labels || ['Strongly Disagree', 'Disagree', 'Neutral', 'Agree', 'Strongly Agree'];
+
+        const setCollapsed = (collapsed) => {
+            container.classList.toggle('likert-question--collapsed', collapsed);
+            header.setAttribute('aria-expanded', collapsed ? 'false' : 'true');
+            chevron.textContent = collapsed ? '\u25b8' : '\u25be'; // \u25b8 vs \u25be
+        };
+
+        // Header toggles only after the question has been answered. Clicking
+        // it before answering would just hide the inputs the user needs.
+        header.addEventListener('click', () => {
+            if (!answeredSet.has(question.id)) return;
+            const collapsed = container.classList.contains('likert-question--collapsed');
+            setCollapsed(!collapsed);
+        });
+
+        const markAnswered = (selectedIdx) => {
+            checkEl.hidden = false;
+            Sanitize.setText(selectedLabelEl, labels[selectedIdx] || '');
+            selectedLabelEl.hidden = false;
+        };
 
         labels.forEach((label, index) => {
             const btn = document.createElement('button');
@@ -115,13 +156,17 @@ const LikertCard = (() => {
                 const score = index + 1;
                 const ok = await _saveResponse(question.id, 'likert', score);
                 if (ok) {
-                    checkEl.hidden = false;
                     answeredSet.add(question.id);
+                    markAnswered(index);
 
                     // Disable all options for this question
                     scale.querySelectorAll('.likert-option').forEach(b => {
                         b.disabled = true;
                     });
+
+                    // Auto-collapse to clear visual clutter \u2014 user can re-expand
+                    // via the chevron header at any time.
+                    setCollapsed(true);
 
                     // Update batch progress
                     onAnswer();
@@ -166,7 +211,8 @@ const LikertCard = (() => {
                 buttons[selectedIdx].classList.add('likert-option--selected');
                 buttons[selectedIdx].setAttribute('aria-checked', 'true');
                 buttons.forEach(b => { b.disabled = true; });
-                checkEl.hidden = false;
+                markAnswered(selectedIdx);
+                setCollapsed(true);
             }
         }
 
