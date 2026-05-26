@@ -550,6 +550,11 @@ def present_question_batch(user_id: str, question_ids: list[str]) -> dict[str, A
         "sub_dimension": enriched[0].get("sub_dimension", "") if enriched else "",
         "dimension": enriched[0].get("dimension", "") if enriched else "",
         "questions": enriched,  # Full data needed by SSE/frontend
+        # question_ids MUST be present so the storage slimmer preserves them;
+        # /api/sessions/{id}/history reads them back to re-hydrate the
+        # LikertCard widget after a page reload. Without this, slimmed events
+        # carry an empty list and the widgets vanish on refresh.
+        "question_ids": [q["id"] for q in enriched],
         "count": len(enriched),
         "missing": missing,
         # Agent-facing summary (the SSE layer strips 'questions' after emitting)
