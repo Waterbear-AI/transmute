@@ -711,8 +711,21 @@ body {
     margin-bottom: 6px;
 }
 
+/* Pin the likert batch card to the full widget-card width so the collapsed
+ * state doesn't shrink to fit its (much shorter) header content. */
+.likert-batch {
+    width: 100%;
+    box-sizing: border-box;
+}
+
 .likert-batch--collapsed .likert-batch__body {
     display: none;
+}
+
+/* When collapsed, the bar is the last visible row — drop the gap that
+ * normally separates it from the questions below. */
+.likert-batch--collapsed .likert-batch-bar {
+    margin-bottom: 0;
 }
 
 .likert-scale {
