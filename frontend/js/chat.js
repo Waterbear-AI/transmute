@@ -472,6 +472,11 @@ const Chat = (() => {
         const fromLabel = from.charAt(0).toUpperCase() + from.slice(1);
         const toLabel = to.charAt(0).toUpperCase() + to.slice(1);
         _appendSystemMessage('Phase transition: ' + fromLabel + ' \u2192 ' + toLabel);
+        // Sub-agent for the new phase is still generating \u2014 _appendSystemMessage
+        // stripped the indicator, so put it back while the stream is alive.
+        if (_abortController) {
+            _showThinkingIndicator();
+        }
     }
 
     function _flushPendingWidgets() {
