@@ -481,10 +481,11 @@ const Chat = (() => {
 
     function _updateCostDisplay(data) {
         const el = document.getElementById('cost-display');
-        if (el) {
-            const cost = (data.estimated_cost_usd || 0).toFixed(2);
-            Sanitize.setText(el, 'Est. cost: $' + cost);
-        }
+        if (!el) return;
+        // Prefer session-cumulative total; fall back to per-turn for old payloads.
+        const cumulative = data.session_cost_usd;
+        const cost = (typeof cumulative === 'number' ? cumulative : (data.estimated_cost_usd || 0)).toFixed(2);
+        Sanitize.setText(el, 'Est. cost: $' + cost);
     }
 
     function _scrollToBottom() {

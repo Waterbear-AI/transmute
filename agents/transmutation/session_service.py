@@ -269,8 +269,14 @@ class SqliteSessionService(BaseSessionService):
         input_tokens: int,
         output_tokens: int,
         cost_usd: float,
-    ) -> None:
-        """Update cumulative token usage for a session."""
+    ) -> tuple[int, int, float]:
+        """Accumulate this turn's usage onto the session row and return the
+        new cumulative totals as (input_tokens, output_tokens, cost_usd).
+
+        Returning the totals lets callers emit a session-cumulative number to
+        clients without a second SELECT race — the read is on the same
+        connection as the write.
+        """
         with get_db_session() as conn:
             conn.execute(
                 """UPDATE adk_sessions
@@ -281,3 +287,15 @@ class SqliteSessionService(BaseSessionService):
                    WHERE session_id = ?""",
                 (input_tokens, output_tokens, cost_usd, datetime.utcnow().isoformat(), session_id),
             )
+            row = conn.execute(
+                """SELECT total_input_tokens, total_output_tokens, estimated_cost_usd
+                   FROM adk_sessions WHERE session_id = ?""",
+                (session_id,),
+            ).fetchone()
+        if not row:
+            return (input_tokens, output_tokens, cost_usd)
+        return (
+            int(row["total_input_tokens"] or 0),
+            int(row["total_output_tokens"] or 0),
+            float(row["estimated_cost_usd"] or 0.0),
+        )

@@ -166,9 +166,10 @@ async def _stream_agent_response(
             "message": str(e),
         })
 
-    # Emit cost tracking
+    # Emit cost tracking — per-turn delta plus session-cumulative totals so
+    # the client can display a running total instead of just the last turn.
     estimated_cost = _estimate_cost(total_input_tokens, total_output_tokens)
-    _session_service.update_token_usage(
+    total_input, total_output, total_cost = _session_service.update_token_usage(
         session_id=session_id,
         input_tokens=total_input_tokens,
         output_tokens=total_output_tokens,
@@ -178,6 +179,9 @@ async def _stream_agent_response(
         "input_tokens": total_input_tokens,
         "output_tokens": total_output_tokens,
         "estimated_cost_usd": round(estimated_cost, 6),
+        "session_input_tokens": total_input,
+        "session_output_tokens": total_output,
+        "session_cost_usd": round(total_cost, 6),
     })
 
 
