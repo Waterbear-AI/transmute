@@ -11,7 +11,7 @@ const LikertCard = (() => {
     function create(data, answeredResponses) {
         const answers = answeredResponses || {};
         const card = document.createElement('div');
-        card.className = 'widget-card';
+        card.className = 'widget-card likert-batch';
         card.setAttribute('role', 'region');
         card.setAttribute('aria-label', 'Assessment questions: ' + (data.sub_dimension || data.dimension));
 
@@ -23,9 +23,19 @@ const LikertCard = (() => {
             if (answers[q.id]) answeredSet.add(q.id);
         }
 
-        // Batch progress header
-        const progressHeader = document.createElement('div');
+        // Batch progress header. Rendered as a <button> so it can act as the
+        // expand/collapse toggle once the batch is complete: keyboard-focusable
+        // (Enter/Space activates), accessible via aria-expanded.
+        const progressHeader = document.createElement('button');
+        progressHeader.type = 'button';
         progressHeader.className = 'likert-batch-progress';
+        progressHeader.setAttribute('aria-expanded', 'true');
+
+        const chevron = document.createElement('span');
+        chevron.className = 'likert-batch-progress__chevron';
+        chevron.setAttribute('aria-hidden', 'true');
+        chevron.textContent = '▾';  // ▾ (DOWN POINTING SMALL TRIANGLE)
+        progressHeader.appendChild(chevron);
 
         const titleEl = document.createElement('span');
         titleEl.className = 'likert-batch-progress__title';
@@ -38,13 +48,27 @@ const LikertCard = (() => {
 
         card.appendChild(progressHeader);
 
-        // Mini progress bar
+        // Mini progress bar (lives outside the body wrapper so it stays
+        // visible even when the batch is collapsed).
         const miniBar = document.createElement('div');
         miniBar.className = 'likert-batch-bar';
         const miniBarFill = document.createElement('div');
         miniBarFill.className = 'likert-batch-bar__fill';
         miniBar.appendChild(miniBarFill);
         card.appendChild(miniBar);
+
+        // Body wrapper holds the questions; hidden via CSS when collapsed.
+        const body = document.createElement('div');
+        body.className = 'likert-batch__body';
+        card.appendChild(body);
+
+        const setCollapsed = (collapsed) => {
+            card.classList.toggle('likert-batch--collapsed', collapsed);
+            progressHeader.setAttribute('aria-expanded', collapsed ? 'false' : 'true');
+            chevron.textContent = collapsed ? '▸' : '▾';  // ▸ vs ▾
+        };
+
+        const isComplete = () => answeredSet.size === totalQuestions;
 
         const updateProgress = () => {
             const count = answeredSet.size;
@@ -56,13 +80,33 @@ const LikertCard = (() => {
             }
         };
 
+        // Header toggles only after the batch is complete. Clicking it
+        // mid-batch would hide the questions the user still needs to answer.
+        progressHeader.addEventListener('click', () => {
+            if (!isComplete()) return;
+            const collapsed = card.classList.contains('likert-batch--collapsed');
+            setCollapsed(!collapsed);
+        });
+
         // Set initial progress
         updateProgress();
 
         for (const q of data.questions) {
             const prefilled = answers[q.id] || null;
-            const questionEl = _createQuestion(q, data.batch_id, answeredSet, totalQuestions, updateProgress, prefilled);
-            card.appendChild(questionEl);
+            const questionEl = _createQuestion(q, data.batch_id, answeredSet, totalQuestions, () => {
+                updateProgress();
+                // Auto-collapse the whole batch the moment the last answer lands.
+                if (isComplete()) {
+                    setCollapsed(true);
+                }
+            }, prefilled);
+            body.appendChild(questionEl);
+        }
+
+        // History mode: if every question was already answered when this card
+        // rendered, start collapsed so reloaded batches don't dominate the chat.
+        if (isComplete()) {
+            setCollapsed(true);
         }
 
         return card;
@@ -72,37 +116,16 @@ const LikertCard = (() => {
         const container = document.createElement('div');
         container.className = 'likert-question';
 
-        // Header is a button so it's keyboard-toggleable (Enter/Space) and
-        // exposes aria-expanded to screen readers. Once a question has been
-        // answered, clicking the header toggles the scale's visibility.
-        const header = document.createElement('button');
-        header.type = 'button';
-        header.className = 'likert-question__header';
-        header.setAttribute('aria-expanded', 'true');
-
-        const chevron = document.createElement('span');
-        chevron.className = 'likert-question__chevron';
-        chevron.setAttribute('aria-hidden', 'true');
-        chevron.textContent = '\u25be'; // \u25be
-        header.appendChild(chevron);
-
-        const textEl = document.createElement('span');
+        const textEl = document.createElement('div');
         textEl.className = 'likert-question__text';
         Sanitize.setText(textEl, question.text);
-        header.appendChild(textEl);
+        container.appendChild(textEl);
 
         const checkEl = document.createElement('span');
         checkEl.className = 'likert-question__check';
         checkEl.hidden = true;
-        checkEl.textContent = '\u2713';
-        header.appendChild(checkEl);
-
-        const selectedLabelEl = document.createElement('span');
-        selectedLabelEl.className = 'likert-question__selected-label';
-        selectedLabelEl.hidden = true;
-        header.appendChild(selectedLabelEl);
-
-        container.appendChild(header);
+        checkEl.textContent = '✓';
+        textEl.appendChild(checkEl);
 
         const scale = document.createElement('div');
         scale.className = 'likert-scale';
@@ -110,26 +133,6 @@ const LikertCard = (() => {
         scale.setAttribute('aria-label', question.text);
 
         const labels = question.scale_labels || ['Strongly Disagree', 'Disagree', 'Neutral', 'Agree', 'Strongly Agree'];
-
-        const setCollapsed = (collapsed) => {
-            container.classList.toggle('likert-question--collapsed', collapsed);
-            header.setAttribute('aria-expanded', collapsed ? 'false' : 'true');
-            chevron.textContent = collapsed ? '\u25b8' : '\u25be'; // \u25b8 vs \u25be
-        };
-
-        // Header toggles only after the question has been answered. Clicking
-        // it before answering would just hide the inputs the user needs.
-        header.addEventListener('click', () => {
-            if (!answeredSet.has(question.id)) return;
-            const collapsed = container.classList.contains('likert-question--collapsed');
-            setCollapsed(!collapsed);
-        });
-
-        const markAnswered = (selectedIdx) => {
-            checkEl.hidden = false;
-            Sanitize.setText(selectedLabelEl, labels[selectedIdx] || '');
-            selectedLabelEl.hidden = false;
-        };
 
         labels.forEach((label, index) => {
             const btn = document.createElement('button');
@@ -156,19 +159,15 @@ const LikertCard = (() => {
                 const score = index + 1;
                 const ok = await _saveResponse(question.id, 'likert', score);
                 if (ok) {
+                    checkEl.hidden = false;
                     answeredSet.add(question.id);
-                    markAnswered(index);
 
                     // Disable all options for this question
                     scale.querySelectorAll('.likert-option').forEach(b => {
                         b.disabled = true;
                     });
 
-                    // Auto-collapse to clear visual clutter \u2014 user can re-expand
-                    // via the chevron header at any time.
-                    setCollapsed(true);
-
-                    // Update batch progress
+                    // Update batch progress (also handles auto-collapse when done)
                     onAnswer();
 
                     // Check batch completion
@@ -211,8 +210,7 @@ const LikertCard = (() => {
                 buttons[selectedIdx].classList.add('likert-option--selected');
                 buttons[selectedIdx].setAttribute('aria-checked', 'true');
                 buttons.forEach(b => { b.disabled = true; });
-                markAnswered(selectedIdx);
-                setCollapsed(true);
+                checkEl.hidden = false;
             }
         }
 
