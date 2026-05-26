@@ -588,6 +588,20 @@ class TestConfigLoading:
         assert cost.input == 0.0
         assert cost.output == 0.0
 
+    def test_bedrock_inference_profile_exact_match(self):
+        settings = Settings()
+        cost = settings.get_cost_per_token("us.anthropic.claude-sonnet-4-6")
+        assert cost.input == 3.00
+        assert cost.output == 15.00
+
+    def test_bedrock_inference_profile_wildcard_match(self):
+        # A future sibling not enumerated explicitly must still hit the
+        # us.anthropic.claude-sonnet-4-* wildcard family entry.
+        settings = Settings()
+        cost = settings.get_cost_per_token("us.anthropic.claude-sonnet-4-99")
+        assert cost.input == 3.00
+        assert cost.output == 15.00
+
     def test_unknown_model_returns_zero_cost(self):
         settings = Settings()
         cost = settings.get_cost_per_token("unknown-model")

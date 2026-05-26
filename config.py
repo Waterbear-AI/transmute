@@ -85,7 +85,7 @@ class Settings(BaseSettings):
         if model_id in self.model_costs:
             return self.model_costs[model_id]
         for pattern, cost in self.model_costs.items():
-            if pattern.endswith("/*") and model_id.startswith(pattern[:-2]):
+            if pattern.endswith("*") and model_id.startswith(pattern[:-1]):
                 return cost
         return ModelCost()
 

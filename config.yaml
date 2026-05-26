@@ -3,9 +3,12 @@ model:
   model_id: us.anthropic.claude-sonnet-4-6  # inference profile ID
   api_key_env: BEDROCK_AWS_ACCESS_KEY_ID  # env var name containing the key
 
-# Cost tracking (per 1M tokens)
+# Cost tracking (per 1M tokens). Keys may be exact model IDs or a prefix ending
+# in '*' (e.g. "us.anthropic.claude-sonnet-4-*"). Exact match wins over wildcard.
 model_costs:
   claude-sonnet-4-5-20250514: { input: 3.00, output: 15.00 }
+  us.anthropic.claude-sonnet-4-6: { input: 3.00, output: 15.00 }
+  "us.anthropic.claude-sonnet-4-*": { input: 3.00, output: 15.00 }
   gpt-4o: { input: 2.50, output: 10.00 }
   gpt-4o-mini: { input: 0.15, output: 0.60 }
   "ollama/*": { input: 0.00, output: 0.00 }
