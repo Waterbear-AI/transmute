@@ -188,6 +188,14 @@ const LikertCard = (() => {
                 console.error('[LikertCard] Save failed:', res.status);
                 return false;
             }
+            // Forward the returned progress to the Results panel. This save
+            // bypasses the agent, so no assessment.progress SSE event will
+            // fire — Results would otherwise stay at 0 / 200 until the agent
+            // happened to call a tool that emits one.
+            const body = await res.json().catch(() => null);
+            if (body && body.progress && typeof Results !== 'undefined') {
+                Results.handleSSEEvent('assessment.progress', { progress: body.progress });
+            }
             return true;
         } catch (err) {
             console.error('[LikertCard] Save error:', err.message);
