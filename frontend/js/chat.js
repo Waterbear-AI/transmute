@@ -46,7 +46,6 @@ const Chat = (() => {
         input.value = '';
         _appendUserMessage(message);
         _setLoading(true);
-        _showThinkingIndicator();
         try {
             await sendMessage(sessionId, message);
         } finally {
@@ -127,6 +126,11 @@ const Chat = (() => {
         if (_abortController) _abortController.abort();
         _abortController = new AbortController();
 
+        // Show the indicator on every send — widget submissions (Likert,
+        // StructuredChoice) call this directly and would otherwise leave the
+        // user staring at a frozen UI while the agent thinks.
+        _showThinkingIndicator();
+
         const timeoutWarning = setTimeout(() => {
             Toast.show('Still waiting for a response... this is taking longer than usual.', 'warning');
         }, 15000);
@@ -184,9 +188,12 @@ const Chat = (() => {
             }
         }
 
-        // Finalize any remaining agent message and flush buffered widgets
+        // Finalize any remaining agent message and flush buffered widgets.
+        // Stream is done — drop the indicator unconditionally; if more is
+        // coming it will be a separate stream and re-show itself.
         _currentMessageEl = null;
         _flushPendingWidgets();
+        _removeThinkingIndicator();
     }
 
     /**
@@ -396,6 +403,13 @@ const Chat = (() => {
         _currentMessageEl.appendChild(Sanitize.sanitizeHTML(html));
         _currentMessageEl = null;
         _scrollToBottom();
+
+        // The stream is still open — a sub-agent (phase transfer) or a tool
+        // round-trip may keep producing. Show the indicator so the user
+        // doesn't see a silent gap. _parseSSEStream clears it on stream end.
+        if (_abortController) {
+            _showThinkingIndicator();
+        }
     }
 
     function _appendToolCall(toolName, args) {
