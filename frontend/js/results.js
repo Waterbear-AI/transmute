@@ -563,7 +563,7 @@ const Results = (() => {
         const chevron = document.createElement('span');
         chevron.className = 'profile-collapsible__chevron';
         chevron.setAttribute('aria-hidden', 'true');
-        chevron.textContent = startCollapsed ? '▸' : '▾';  // ▸ / ▾
+        chevron.textContent = startCollapsed ? '▶' : '▼';  // ▶ collapsed / ▼ expanded
         toggle.appendChild(chevron);
 
         const titleSpan = document.createElement('span');
@@ -586,7 +586,7 @@ const Results = (() => {
         toggle.addEventListener('click', () => {
             const collapsed = section.classList.toggle('profile-collapsible--collapsed');
             toggle.setAttribute('aria-expanded', collapsed ? 'false' : 'true');
-            chevron.textContent = collapsed ? '▸' : '▾';
+            chevron.textContent = collapsed ? '▶' : '▼';
         });
 
         parentEl.appendChild(section);
