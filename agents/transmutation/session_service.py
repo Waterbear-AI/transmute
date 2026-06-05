@@ -299,3 +299,19 @@ class SqliteSessionService(BaseSessionService):
             int(row["total_output_tokens"] or 0),
             float(row["estimated_cost_usd"] or 0.0),
         )
+
+    def get_user_total_cost(self, user_id: str) -> float:
+        """Return the user's lifetime accumulated estimated LLM cost (USD)
+        across ALL of their sessions, archived included.
+
+        A single SUM — never a per-session loop. Computed separately from the
+        archived-filtered session list so archiving a session does not
+        undercount the lifetime total.
+        """
+        with get_db_session() as conn:
+            row = conn.execute(
+                """SELECT COALESCE(SUM(estimated_cost_usd), 0.0) AS total
+                   FROM adk_sessions WHERE user_id = ?""",
+                (user_id,),
+            ).fetchone()
+        return float(row["total"] or 0.0) if row else 0.0

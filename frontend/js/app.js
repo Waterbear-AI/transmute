@@ -48,6 +48,10 @@ const App = (() => {
 
             if (sessionsRes.ok) {
                 const body = await sessionsRes.json();
+                // Seed the lifetime cost total so the top bar shows it on load.
+                if (typeof body.user_total_cost_usd === 'number') {
+                    Chat.seedCostTotal(body.user_total_cost_usd);
+                }
                 const sessions = body.sessions || body;
                 Sessions.render(sessions);
                 if (sessions.length > 0) {

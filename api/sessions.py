@@ -38,6 +38,7 @@ class SessionResponse(BaseModel):
 class SessionListResponse(BaseModel):
     sessions: list[SessionResponse]
     count: int
+    user_total_cost_usd: float = 0.0  # lifetime accumulated LLM cost across all sessions
 
 
 # --- History endpoint models ---
@@ -175,7 +176,18 @@ async def list_sessions(
             message_count=msg_count,
         ))
 
-    return SessionListResponse(sessions=sessions, count=len(sessions))
+    # Lifetime accumulated cost across all the user's sessions (best-effort).
+    try:
+        user_total_cost = _session_service.get_user_total_cost(user_id)
+    except Exception:
+        logger.warning("Failed to compute user total cost for %s", user_id, exc_info=True)
+        user_total_cost = 0.0
+
+    return SessionListResponse(
+        sessions=sessions,
+        count=len(sessions),
+        user_total_cost_usd=round(user_total_cost, 6),
+    )
 
 
 @router.get("/{session_id}/history", response_model=HistoryResponse)

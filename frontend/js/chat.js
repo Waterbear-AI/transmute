@@ -498,13 +498,34 @@ const Chat = (() => {
         }
     }
 
-    function _updateCostDisplay(data) {
+    // Last known lifetime total across all the user's sessions. Seeded on load
+    // from /api/sessions and refreshed live from the session.cost SSE payload.
+    let _lastUserTotal = 0;
+
+    function _renderCost(sessionCost, totalCost) {
         const el = document.getElementById('cost-display');
         if (!el) return;
+        const s = (typeof sessionCost === 'number' ? sessionCost : 0).toFixed(2);
+        const t = (typeof totalCost === 'number' ? totalCost : 0).toFixed(2);
+        Sanitize.setText(el, 'Est. cost: $' + s + ' (total $' + t + ')');
+    }
+
+    function _updateCostDisplay(data) {
         // Prefer session-cumulative total; fall back to per-turn for old payloads.
-        const cumulative = data.session_cost_usd;
-        const cost = (typeof cumulative === 'number' ? cumulative : (data.estimated_cost_usd || 0)).toFixed(2);
-        Sanitize.setText(el, 'Est. cost: $' + cost);
+        const sessionCost = typeof data.session_cost_usd === 'number'
+            ? data.session_cost_usd
+            : (data.estimated_cost_usd || 0);
+        if (typeof data.user_total_cost_usd === 'number') {
+            _lastUserTotal = data.user_total_cost_usd;
+        }
+        _renderCost(sessionCost, _lastUserTotal);
+    }
+
+    // Seed the lifetime total on load (before any chat turn this session), so the
+    // top bar shows "Est. cost: $0.00 (total $X)" immediately.
+    function seedCostTotal(total) {
+        if (typeof total === 'number') _lastUserTotal = total;
+        _renderCost(0, _lastUserTotal);
     }
 
     function _scrollToBottom() {
@@ -569,6 +590,7 @@ const Chat = (() => {
         sendMessage,
         startSession,
         renderHistory,
+        seedCostTotal,
         appendSystemMessage: _appendSystemMessage
     };
 })();

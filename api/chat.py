@@ -175,14 +175,23 @@ async def _stream_agent_response(
         output_tokens=total_output_tokens,
         cost_usd=estimated_cost,
     )
-    yield _sse_event("session.cost", {
+    cost_payload = {
         "input_tokens": total_input_tokens,
         "output_tokens": total_output_tokens,
         "estimated_cost_usd": round(estimated_cost, 6),
         "session_input_tokens": total_input,
         "session_output_tokens": total_output,
         "session_cost_usd": round(total_cost, 6),
-    })
+    }
+    # Lifetime total across all the user's sessions. Best-effort: a failure here
+    # must not abort the stream — the client falls back to its last known total.
+    try:
+        cost_payload["user_total_cost_usd"] = round(
+            _session_service.get_user_total_cost(user_id), 6
+        )
+    except Exception:
+        logger.warning("Failed to compute user total cost for %s", user_id, exc_info=True)
+    yield _sse_event("session.cost", cost_payload)
 
 
 def _estimate_cost(input_tokens: int, output_tokens: int) -> float:
