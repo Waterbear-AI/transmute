@@ -1,5 +1,6 @@
 import json
 import logging
+import sqlite3
 import uuid
 from datetime import datetime
 from typing import Any, Optional
@@ -299,6 +300,107 @@ class SqliteSessionService(BaseSessionService):
             int(row["total_output_tokens"] or 0),
             float(row["estimated_cost_usd"] or 0.0),
         )
+
+    def record_llm_call(
+        self,
+        session_id: str | None,
+        user_id: str,
+        author: str | None,
+        phase: str | None,
+        model_id: str | None,
+        input_tokens: int,
+        output_tokens: int,
+        cost_usd: float,
+    ) -> None:
+        """Insert one row into llm_calls for auditing a single LLM turn.
+
+        Best-effort: errors are logged but never re-raised so a recording
+        failure cannot interrupt the main chat stream.
+        """
+        try:
+            with get_db_session() as conn:
+                conn.execute(
+                    """INSERT INTO llm_calls
+                       (session_id, user_id, author, phase, model_id,
+                        input_tokens, output_tokens, cost_usd, created_at)
+                       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+                    (
+                        session_id,
+                        user_id,
+                        author,
+                        phase,
+                        model_id,
+                        input_tokens,
+                        output_tokens,
+                        cost_usd,
+                        datetime.utcnow().isoformat(),
+                    ),
+                )
+        except sqlite3.Error as exc:
+            logger.error(
+                "record_llm_call failed for user_id=%s session_id=%s: %s",
+                user_id,
+                session_id,
+                exc,
+            )
+
+    def list_llm_calls(
+        self,
+        user_id: str,
+        limit: int,
+        before_id: int | None = None,
+    ) -> tuple[list[dict], bool]:
+        """Return up to *limit* LLM call records for *user_id*, newest first.
+
+        Uses keyset pagination: pass the last row's *id* as *before_id* to
+        retrieve the next page.  Returns a tuple of (items, has_more).
+        """
+        # Clamp to sane bounds (1..100) — enforced server-side regardless of
+        # what the caller passes (backend-business-logic-protection R5).
+        effective_limit = max(1, min(limit, 100))
+
+        if before_id is not None:
+            rows = self._query_llm_calls_before(user_id, effective_limit + 1, before_id)
+        else:
+            rows = self._query_llm_calls(user_id, effective_limit + 1)
+
+        has_more = len(rows) > effective_limit
+        items = rows[:effective_limit]
+
+        return (
+            [dict(row) for row in items],
+            has_more,
+        )
+
+    # ------------------------------------------------------------------
+    # Private helpers
+    # ------------------------------------------------------------------
+
+    def _query_llm_calls(self, user_id: str, fetch_limit: int) -> list:
+        with get_db_session() as conn:
+            return conn.execute(
+                """SELECT id, session_id, author, phase, model_id,
+                          input_tokens, output_tokens, cost_usd, created_at
+                   FROM llm_calls
+                   WHERE user_id = ?
+                   ORDER BY id DESC
+                   LIMIT ?""",
+                (user_id, fetch_limit),
+            ).fetchall()
+
+    def _query_llm_calls_before(
+        self, user_id: str, fetch_limit: int, before_id: int
+    ) -> list:
+        with get_db_session() as conn:
+            return conn.execute(
+                """SELECT id, session_id, author, phase, model_id,
+                          input_tokens, output_tokens, cost_usd, created_at
+                   FROM llm_calls
+                   WHERE user_id = ? AND id < ?
+                   ORDER BY id DESC
+                   LIMIT ?""",
+                (user_id, before_id, fetch_limit),
+            ).fetchall()
 
     def get_user_total_cost(self, user_id: str) -> float:
         """Return the user's lifetime accumulated estimated LLM cost (USD)
