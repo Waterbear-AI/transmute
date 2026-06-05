@@ -286,7 +286,12 @@ const Chat = (() => {
                 break;
 
             case 'education.comprehension':
-                _pendingWidgets.push(() => StructuredChoice.create(data));
+                // Guard: record_comprehension_answer feedback also carries event_type
+                // "education.comprehension" but has no options. Only create the
+                // interactive card when options is a non-empty array.
+                if (Array.isArray(data.options) && data.options.length) {
+                    _pendingWidgets.push(() => StructuredChoice.create(data));
+                }
                 break;
 
             case 'assessment.progress':
@@ -583,7 +588,11 @@ const Chat = (() => {
                     el = ScenarioCard.create(data);
                     break;
                 case 'education.comprehension':
-                    el = StructuredChoice.create(data);
+                    // Guard: feedback events share this event_type but have no options.
+                    // Only render the interactive card when options is a non-empty array.
+                    if (Array.isArray(data.options) && data.options.length) {
+                        el = StructuredChoice.create(data);
+                    }
                     break;
                 case 'phase.transition':
                     _appendPhaseTransition(data.from, data.to);
