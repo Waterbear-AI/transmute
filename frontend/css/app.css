@@ -1288,6 +1288,132 @@ body {
     background: var(--color-text-muted);
 }
 
+/* ── Profile Tab: Insight Sections ─────────── */
+
+/* Dimension score rows (Dimension Scores section) */
+.profile-dim__row {
+    margin: 8px 0;
+}
+
+.profile-dim__label {
+    display: flex;
+    justify-content: space-between;
+    align-items: baseline;
+    margin-bottom: 3px;
+}
+
+.profile-dim__score {
+    font-size: 13px;
+    color: var(--color-text-muted);
+    font-family: var(--font-mono);
+}
+
+.profile-section__title {
+    margin-top: 20px;
+    margin-bottom: 8px;
+    font-size: 14px;
+    font-weight: 600;
+    color: var(--color-text-muted);
+    text-transform: uppercase;
+    letter-spacing: 0.05em;
+}
+
+/* Insight sections: Top Strengths, Growth Areas, Cross-Dimensional */
+.profile-insight-section {
+    margin: 20px 0;
+}
+
+.profile-insight-section__title {
+    font-size: 15px;
+    font-weight: 600;
+    color: var(--color-text);
+    margin-bottom: 10px;
+    border-bottom: 1px solid var(--color-border);
+    padding-bottom: 6px;
+}
+
+.profile-insight-section__list {
+    list-style: none;
+    padding: 0;
+    margin: 0;
+    display: flex;
+    flex-direction: column;
+    gap: 10px;
+}
+
+.profile-insight__item {
+    padding: 10px 12px;
+    background: var(--color-surface);
+    border: 1px solid var(--color-border);
+    border-radius: 6px;
+    border-left: 3px solid var(--phase-profile);
+}
+
+.profile-insight__item--cross {
+    border-left-color: var(--color-accent);
+    font-size: 13px;
+    line-height: 1.6;
+    color: var(--color-text);
+}
+
+.profile-insight__summary {
+    display: flex;
+    justify-content: space-between;
+    align-items: baseline;
+    font-size: 14px;
+    font-weight: 500;
+    margin-bottom: 4px;
+}
+
+.profile-insight__score {
+    font-size: 13px;
+    color: var(--color-text-muted);
+    font-family: var(--font-mono);
+}
+
+.profile-insight__note {
+    font-size: 13px;
+    color: var(--color-text-muted);
+    line-height: 1.5;
+    margin-top: 4px;
+}
+
+.profile-insight__num {
+    font-weight: 600;
+    color: var(--color-text-muted);
+    margin-right: 2px;
+}
+
+/* Sub-dimension bars (indented under parent dimension) */
+.profile-subdim__row {
+    margin: 6px 0 2px 12px;
+}
+
+.profile-subdim__label {
+    display: flex;
+    align-items: baseline;
+    margin-bottom: 3px;
+    gap: 4px;
+}
+
+.profile-subdim__arrow {
+    color: var(--color-text-muted);
+    font-size: 11px;
+    flex-shrink: 0;
+}
+
+.profile-subdim__score {
+    font-size: 12px;
+    color: var(--color-text-muted);
+    font-family: var(--font-mono);
+    margin-left: auto;
+}
+
+.profile-subdim__bar {
+    height: 5px;
+    margin-left: 14px;
+}
+
 /* ── Responsive ─────────────────────────────── */
 
 @media (max-width: 768px) {

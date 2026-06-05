@@ -71,8 +71,12 @@ const Results = (() => {
 
             case 'profile.snapshot':
                 _resultsData.profile_snapshots = data;
-                if (_activeTab === 'profile') _renderTabContent('profile');
+                // Render tabs first so the Profile tab becomes visible (it is
+                // visibility-gated on profile_snapshots being non-null), then
+                // switch to it. Switching before _renderTabs() would select a
+                // hidden tab and render into an invisible container.
                 _renderTabs();
+                _switchTab('profile');
                 // Re-fetch full results to get spider chart (binary data not sent via SSE)
                 if (_userId) {
                     fetch('/api/results/' + encodeURIComponent(_userId))
@@ -380,21 +384,97 @@ const Results = (() => {
             el.appendChild(img);
         }
 
+        // Structured insight sections (strengths, growth areas, cross-dimensional)
+        // Only rendered when structured_insights is present — old snapshots fall back
+        // to the interpretation paragraph rendered above (no crash, no blank).
+        const si = data.structured_insights;
+        if (si && typeof si === 'object') {
+            // Top Strengths
+            if (Array.isArray(si.strengths) && si.strengths.length > 0) {
+                _renderInsightSection(el, '🌟 Top Strengths', si.strengths, (item) => {
+                    const li = document.createElement('li');
+                    li.className = 'profile-insight__item';
+                    const summary = document.createElement('div');
+                    summary.className = 'profile-insight__summary';
+                    const nameSpan = document.createElement('span');
+                    Sanitize.setText(nameSpan, item.dimension + ' — ' + item.level);
+                    const scoreSpan = document.createElement('span');
+                    scoreSpan.className = 'profile-insight__score';
+                    Sanitize.setText(scoreSpan, '(' + (Math.round(item.score * 100) / 100) + ')');
+                    summary.appendChild(nameSpan);
+                    summary.appendChild(scoreSpan);
+                    li.appendChild(summary);
+                    if (item.note) {
+                        const note = document.createElement('div');
+                        note.className = 'profile-insight__note';
+                        Sanitize.setText(note, item.note);
+                        li.appendChild(note);
+                    }
+                    // Sub-dimension bars for this dimension from scores
+                    if (data.scores && data.scores[item.dimension]) {
+                        _renderSubDimensionBars(li, data.scores[item.dimension]);
+                    }
+                    return li;
+                });
+            }
+
+            // Growth Areas
+            if (Array.isArray(si.growth_areas) && si.growth_areas.length > 0) {
+                _renderInsightSection(el, '🌱 Growth Areas', si.growth_areas, (item) => {
+                    const li = document.createElement('li');
+                    li.className = 'profile-insight__item';
+                    const summary = document.createElement('div');
+                    summary.className = 'profile-insight__summary';
+                    const nameSpan = document.createElement('span');
+                    Sanitize.setText(nameSpan, item.dimension + ' — ' + item.level);
+                    const scoreSpan = document.createElement('span');
+                    scoreSpan.className = 'profile-insight__score';
+                    Sanitize.setText(scoreSpan, '(' + (Math.round(item.score * 100) / 100) + ')');
+                    summary.appendChild(nameSpan);
+                    summary.appendChild(scoreSpan);
+                    li.appendChild(summary);
+                    if (item.note) {
+                        const note = document.createElement('div');
+                        note.className = 'profile-insight__note';
+                        Sanitize.setText(note, item.note);
+                        li.appendChild(note);
+                    }
+                    if (data.scores && data.scores[item.dimension]) {
+                        _renderSubDimensionBars(li, data.scores[item.dimension]);
+                    }
+                    return li;
+                });
+            }
+
+            // Cross-Dimensional Insights
+            if (Array.isArray(si.cross_dimensional_insights) && si.cross_dimensional_insights.length > 0) {
+                _renderInsightSection(el, '🕸️ Cross-Dimensional Insights', si.cross_dimensional_insights, (text, idx) => {
+                    const li = document.createElement('li');
+                    li.className = 'profile-insight__item profile-insight__item--cross';
+                    const num = document.createElement('span');
+                    num.className = 'profile-insight__num';
+                    Sanitize.setText(num, (idx + 1) + '. ');
+                    li.appendChild(num);
+                    // Sanitize.textNode returns a safe text node — never innerHTML
+                    li.appendChild(Sanitize.textNode(String(text)));
+                    return li;
+                });
+            }
+        }
+
         // Dimension scores breakdown
         if (data.scores) {
             const scoresHeader = document.createElement('h4');
-            scoresHeader.style.marginTop = '16px';
+            scoresHeader.className = 'profile-section__title';
             Sanitize.setText(scoresHeader, 'Dimension Scores');
             el.appendChild(scoresHeader);
 
             for (const [dim, dimData] of Object.entries(data.scores)) {
                 const row = document.createElement('div');
-                row.style.margin = '8px 0';
+                row.className = 'profile-dim__row';
 
                 const label = document.createElement('div');
-                label.style.display = 'flex';
-                label.style.justifyContent = 'space-between';
-                label.style.marginBottom = '2px';
+                label.className = 'profile-dim__label';
 
                 const nameEl = document.createElement('span');
                 Sanitize.setText(nameEl, dim);
@@ -402,14 +482,20 @@ const Results = (() => {
 
                 const score = typeof dimData === 'object' ? (dimData.weighted_avg || dimData.score || 0) : dimData;
                 const scoreEl = document.createElement('span');
-                scoreEl.style.color = 'var(--color-text-muted)';
-                scoreEl.style.fontSize = '13px';
+                scoreEl.className = 'profile-dim__score';
                 Sanitize.setText(scoreEl, Math.round(score * 100) / 100 + '');
                 label.appendChild(scoreEl);
 
                 row.appendChild(label);
-                // Normalize score to 0-1 for bar (scores are typically 1-5)
-                row.appendChild(_createProgressBar(Math.min(score / 5, 1)));
+                const bar = _createProgressBar(Math.min(score / 5, 1));
+                bar.setAttribute('aria-label', dim + ': ' + (Math.round(score * 100) / 100));
+                row.appendChild(bar);
+
+                // Sub-dimension rows nested under each dimension
+                if (typeof dimData === 'object' && dimData.sub_dimensions) {
+                    _renderSubDimensionBars(row, dimData);
+                }
+
                 el.appendChild(row);
             }
         }
@@ -419,6 +505,78 @@ const Results = (() => {
         el.appendChild(chartContainer);
         if (typeof QuadrantChart !== 'undefined') {
             QuadrantChart.render(chartContainer, data.quadrant_placement || null, data.flow_data || null);
+        }
+    }
+
+    /**
+     * Render a titled insight section (Strengths, Growth Areas, Cross-Dimensional Insights).
+     * @param {Element} parentEl - Container to append the section into.
+     * @param {string} title - Section title text (may include emoji).
+     * @param {Array} items - Array of items to render.
+     * @param {Function} renderItemFn - (item, index) => HTMLElement for each item.
+     */
+    function _renderInsightSection(parentEl, title, items, renderItemFn) {
+        const section = document.createElement('div');
+        section.className = 'profile-insight-section';
+
+        const heading = document.createElement('h4');
+        heading.className = 'profile-insight-section__title';
+        // Emoji in title is decorative — aria-hidden keeps it out of screen reader announcements
+        heading.setAttribute('aria-label', title.replace(/[\u{1F000}-\u{1FFFF}]|[☀-⛿]|[✀-➿]|️/gu, '').trim());
+        Sanitize.setText(heading, title);
+        section.appendChild(heading);
+
+        const list = document.createElement('ul');
+        list.className = 'profile-insight-section__list';
+
+        items.forEach((item, idx) => {
+            const el = renderItemFn(item, idx);
+            if (el) list.appendChild(el);
+        });
+
+        section.appendChild(list);
+        parentEl.appendChild(section);
+    }
+
+    /**
+     * Render sub-dimension progress bars indented under a parent dimension row.
+     * Reads sub_dimensions from dimData ({sd: {score, answered}}).
+     * @param {Element} parentEl - Row element to append bars into.
+     * @param {Object} dimData - Dimension data object with sub_dimensions map.
+     */
+    function _renderSubDimensionBars(parentEl, dimData) {
+        const subDims = dimData && dimData.sub_dimensions;
+        if (!subDims || typeof subDims !== 'object') return;
+
+        for (const [sdName, sdData] of Object.entries(subDims)) {
+            const sdScore = typeof sdData === 'object' ? (sdData.score || 0) : sdData;
+            const sdRow = document.createElement('div');
+            sdRow.className = 'profile-subdim__row';
+
+            const sdLabel = document.createElement('div');
+            sdLabel.className = 'profile-subdim__label';
+            const arrow = document.createElement('span');
+            arrow.className = 'profile-subdim__arrow';
+            arrow.setAttribute('aria-hidden', 'true');
+            Sanitize.setText(arrow, '▸ ');
+            const sdNameEl = document.createElement('span');
+            Sanitize.setText(sdNameEl, sdName);
+            sdLabel.appendChild(arrow);
+            sdLabel.appendChild(sdNameEl);
+
+            const sdScoreEl = document.createElement('span');
+            sdScoreEl.className = 'profile-subdim__score';
+            Sanitize.setText(sdScoreEl, Math.round(sdScore * 100) / 100 + '');
+            sdLabel.appendChild(sdScoreEl);
+
+            sdRow.appendChild(sdLabel);
+
+            const sdBar = _createProgressBar(Math.min(sdScore / 5, 1));
+            sdBar.className += ' profile-subdim__bar';
+            sdBar.setAttribute('aria-label', sdName + ': ' + (Math.round(sdScore * 100) / 100));
+            sdRow.appendChild(sdBar);
+
+            parentEl.appendChild(sdRow);
         }
     }
 
