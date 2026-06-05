@@ -614,11 +614,42 @@ const Chat = (() => {
     /**
      * Load conversation history for a session (for viewing past sessions).
      */
+    // Control messages are machine payloads the widgets send TO the agent
+    // (not human-typed). They are JSON-encoded with one of these `type`
+    // discriminators. Live, sendMessage never renders a user bubble for them;
+    // on reload they come back as role:'user' history rows and must NOT be
+    // shown as raw JSON. Keep this list in sync with the widgets that call
+    // Chat.sendMessage(JSON.stringify({type: ...})).
+    const _CONTROL_MESSAGE_TYPES = new Set([
+        'comprehension_answer',  // StructuredChoice
+        'batch_complete',        // LikertCard
+    ]);
+
+    // Returns true when `text` is a JSON control payload that should be hidden
+    // from the chat transcript. Guarded so ordinary text (which is not valid
+    // JSON, or is JSON without a recognized control type) still renders.
+    function _isControlMessage(text) {
+        if (typeof text !== 'string') return false;
+        const trimmed = text.trim();
+        if (!trimmed.startsWith('{')) return false;  // fast path: not an object
+        try {
+            const parsed = JSON.parse(trimmed);
+            return !!parsed
+                && typeof parsed === 'object'
+                && _CONTROL_MESSAGE_TYPES.has(parsed.type);
+        } catch (e) {
+            return false;  // not JSON → a normal user message, render it
+        }
+    }
+
     function renderHistory(messages, answeredResponses) {
         clear();
         const answers = answeredResponses || {};
         for (const msg of messages) {
             if (msg.role === 'user') {
+                // Suppress machine control payloads (e.g. comprehension answers)
+                // so they don't appear as raw JSON bubbles after a reload.
+                if (_isControlMessage(msg.text)) continue;
                 _appendUserMessage(msg.text);
             } else if (msg.role === 'agent') {
                 const el = document.createElement('div');
