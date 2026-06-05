@@ -5,6 +5,7 @@ from agents.transmutation.sub_agents.inject_user_id import with_user_id
 from agents.transmutation.tools import (
     get_user_profile,
     get_education_progress,
+    present_comprehension_question,
     record_comprehension_answer,
     advance_phase,
     flag_safety_concern,
@@ -29,6 +30,7 @@ def create_education_agent(model: str = "") -> LlmAgent:
         tools=[
             get_user_profile,
             get_education_progress,
+            present_comprehension_question,
             record_comprehension_answer,
             advance_phase,
             flag_safety_concern,

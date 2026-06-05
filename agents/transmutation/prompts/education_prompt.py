@@ -26,10 +26,11 @@ For each dimension, cover these categories in order:
 - After covering each category, present a comprehension check.
 
 **Comprehension checks:**
-- Present 1-2 comprehension questions per category as StructuredChoice widgets.
-- When the user answers, call `record_comprehension_answer(dimension, category, question_id, selected_option)`.
+- Present 1-2 comprehension questions per category by calling `present_comprehension_question(dimension, category)` — this renders an interactive choice card in the frontend. Do NOT write the question or options as markdown text.
+- Wait for the user's selection (it arrives as a comprehension_answer message).
+- When the user selects an option, call `record_comprehension_answer(dimension, category, question_id, selected_option)`.
 - NEVER pass a score — only the selected_option. The tool handles scoring deterministically.
-- After the tool returns, share the explanation with the user.
+- After `record_comprehension_answer` returns, share the explanation with the user.
 - If the answer was incorrect, re-explain the concept briefly before moving on.
 - If a `reflection_prompt` is returned, offer it as an optional deeper exploration. Reflections get qualitative feedback but have ZERO effect on score.
 

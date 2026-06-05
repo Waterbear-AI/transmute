@@ -1097,6 +1097,98 @@ def get_education_progress(user_id: str) -> dict[str, Any]:
     }
 
 
+def present_comprehension_question(
+    user_id: str,
+    dimension: str,
+    category: str,
+    question_id: Optional[str] = None,
+) -> dict[str, Any]:
+    """Present a comprehension check question to the user as an interactive widget.
+
+    Call this instead of writing question text as markdown — the returned payload
+    triggers an interactive StructuredChoice card in the frontend via SSE.
+
+    If ``question_id`` is provided, that specific question is returned.
+    If omitted, the tool selects the next unanswered question for the given
+    dimension and category based on the user's education_progress.
+
+    Args:
+        user_id: The authenticated user's ID.
+        dimension: Transmutation dimension (e.g. "Emotional Awareness").
+        category: One of the five canonical categories per dimension
+            (e.g. "what_this_means", "your_score", "daily_effects",
+            "strengths_gaps", "external_interaction").
+        question_id: Optional specific question ID to present. When omitted,
+            the next unanswered question is selected automatically.
+
+    Returns:
+        On success: dict with ``event_type`` = "education.comprehension",
+            plus ``dimension``, ``category``, ``question_id``, ``stem``,
+            and ``options`` (list of {key, text} — correct_option and
+            explanation are NEVER included).
+        When all answered: {"status": "no_questions", "dimension": ..., "category": ...}
+        On unknown question_id: {"error": "<message>"}
+    """
+    qb = get_question_bank()
+
+    if question_id is not None:
+        # Specific question requested — look it up directly.
+        question = qb.get_comprehension_question_by_id(question_id)
+        if question is None:
+            logger.warning(
+                "present_comprehension_question: unknown question_id=%s", question_id
+            )
+            return {"error": f"Comprehension question '{question_id}' not found."}
+    else:
+        # Auto-select the next unanswered question for this dimension + category.
+        all_questions = qb.get_comprehension_questions_for_category(dimension, category)
+        if not all_questions:
+            logger.debug(
+                "present_comprehension_question: no questions for %s/%s",
+                dimension, category,
+            )
+            return {"status": "no_questions", "dimension": dimension, "category": category}
+
+        # Fetch answered question IDs from education_progress (read-only).
+        with get_db_session() as conn:
+            row = conn.execute(
+                "SELECT progress FROM education_progress WHERE user_id = ?",
+                (user_id,),
+            ).fetchone()
+
+        answered_ids: set[str] = set()
+        if row:
+            progress = json.loads(row["progress"] or "{}")
+            answered_ids = set(
+                progress.get(dimension, {}).get(category, {}).get("questions_answered", [])
+            )
+
+        # Pick the first question not yet answered.
+        question = next(
+            (q for q in all_questions if q["id"] not in answered_ids),
+            None,
+        )
+        if question is None:
+            logger.debug(
+                "present_comprehension_question: all questions answered for %s/%s",
+                dimension, category,
+            )
+            return {"status": "no_questions", "dimension": dimension, "category": category}
+
+    # Build the safe payload — explicitly exclude correct_option and explanation
+    # so the client cannot read the answer from the SSE stream.
+    safe_options = [{"key": o["key"], "text": o["text"]} for o in question["options"]]
+
+    return {
+        "event_type": "education.comprehension",
+        "dimension": dimension,
+        "category": category,
+        "question_id": question["id"],
+        "stem": question["stem"],
+        "options": safe_options,
+    }
+
+
 def record_comprehension_answer(
     user_id: str,
     dimension: str,
