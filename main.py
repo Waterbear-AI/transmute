@@ -18,6 +18,7 @@ from api.health import router as health_router
 from api.sessions import router as sessions_router
 from api.assessment import router as assessment_router
 from api.results import router as results_router
+from api.usage import router as usage_router
 from db.database import run_migrations
 from rate_limit import limiter
 
@@ -59,6 +60,7 @@ app.include_router(export_router)
 app.include_router(sessions_router)
 app.include_router(assessment_router)
 app.include_router(results_router)
+app.include_router(usage_router)
 
 # Mount frontend static files last (catches all unmatched routes)
 if FRONTEND_DIR.exists():
