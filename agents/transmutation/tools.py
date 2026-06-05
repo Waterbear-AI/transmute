@@ -840,13 +840,18 @@ def _dim_score(scores: dict, dim: str) -> Optional[float]:
     return None
 
 
-def save_profile_snapshot(user_id: str, interpretation: str) -> dict[str, Any]:
+def save_profile_snapshot(
+    user_id: str,
+    interpretation: str,
+    structured_insights: dict | None = None,
+) -> dict[str, Any]:
     """Persist a profile snapshot with the LLM's narrative interpretation.
 
     Must be called after generate_profile_snapshot, generate_reassessment_snapshot,
     or generate_check_in_snapshot. Saves scores, quadrant, spider chart,
-    interpretation, and flow_data to the profile_snapshots table. Also persists
-    Moral Capital (C+) and Moral Debt (C-) to the moral_ledger table.
+    interpretation, flow_data, and structured_insights to the profile_snapshots
+    table. Also persists Moral Capital (C+) and Moral Debt (C-) to the
+    moral_ledger table.
 
     Three persistence paths, selected by markers on the cached profile (all
     run inside a single DB transaction for atomicity):
@@ -865,6 +870,24 @@ def save_profile_snapshot(user_id: str, interpretation: str) -> dict[str, Any]:
     Branch precedence is check-in → reassessment → baseline. In practice
     `sentinel` and `kind` never co-occur (each generate_* helper sets only its
     own marker); the explicit ordering makes precedence audit-able.
+
+    Args:
+        user_id: The authenticated user's ID.
+        interpretation: Short headline + one-line takeaway shown at the top of
+            the Profile tab and in the chat transcript.
+        structured_insights: Optional rich breakdown for the Profile tab.
+            When provided, must follow this shape:
+            {
+              "strengths": [
+                {"dimension": str, "level": str, "score": float, "note": str}
+              ],
+              "growth_areas": [
+                {"dimension": str, "level": str, "score": float, "note": str}
+              ],
+              "cross_dimensional_insights": [str]  # 2-3 short paragraphs
+            }
+            Defaults to None; existing callers that omit this argument are
+            unaffected (column stored as NULL, tab falls back to interpretation).
     """
     cached = _profile_cache.pop(user_id, None)
     if not cached:
@@ -904,10 +927,17 @@ def save_profile_snapshot(user_id: str, interpretation: str) -> dict[str, Any]:
         flow_profile = cached.get("flow_profile")
         flow_data_json = flow_profile.model_dump_json() if flow_profile else None
 
+        # Serialize structured_insights; coerce non-dict to None to keep the
+        # snapshot atomic and avoid agent-induced errors.
+        if isinstance(structured_insights, dict) and structured_insights:
+            structured_insights_json = json.dumps(structured_insights)
+        else:
+            structured_insights_json = None
+
         conn.execute(
             """INSERT INTO profile_snapshots
-               (id, user_id, session_id, scores, quadrant_placement, spider_chart, interpretation, previous_snapshot_id, created_at, flow_data)
-               VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+               (id, user_id, session_id, scores, quadrant_placement, spider_chart, interpretation, previous_snapshot_id, created_at, flow_data, structured_insights)
+               VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
             (
                 snapshot_id,
                 user_id,
@@ -919,6 +949,7 @@ def save_profile_snapshot(user_id: str, interpretation: str) -> dict[str, Any]:
                 prev_id,
                 datetime.utcnow().isoformat(),
                 flow_data_json,
+                structured_insights_json,
             ),
         )
 
@@ -1007,6 +1038,9 @@ def save_profile_snapshot(user_id: str, interpretation: str) -> dict[str, Any]:
         "quadrant": quadrant_name,
         "quadrant_placement": quadrant_data,
         "interpretation": interpretation,
+        # Include the dict (not the JSON string) so the SSE payload is directly
+        # usable by the frontend without an extra parse step.
+        "structured_insights": structured_insights if isinstance(structured_insights, dict) and structured_insights else None,
     }
 
     # Spider chart is persisted in DB — frontend fetches it via /api/results.

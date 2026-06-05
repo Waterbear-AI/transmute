@@ -25,6 +25,7 @@ class ProfileSnapshotResponse(BaseModel):
     quadrant_placement: Optional[dict[str, Any]] = None
     quadrant: Optional[str] = None
     interpretation: Optional[str] = None
+    structured_insights: Optional[dict[str, Any]] = None
     has_spider_chart: bool = False
     spider_data: Optional[dict[str, Any]] = None
     flow_data: Optional[dict[str, Any]] = None
@@ -176,7 +177,7 @@ def get_results(
 
         # Get profile snapshots
         profile_rows = conn.execute(
-            "SELECT id, scores, quadrant_placement, interpretation, spider_chart, flow_data, created_at FROM profile_snapshots WHERE user_id = ? ORDER BY created_at DESC",
+            "SELECT id, scores, quadrant_placement, interpretation, spider_chart, flow_data, structured_insights, created_at FROM profile_snapshots WHERE user_id = ? ORDER BY created_at DESC",
             (user_id,),
         ).fetchall()
 
@@ -197,12 +198,24 @@ def get_results(
                 except Exception:
                     pass
 
+            structured_insights = None
+            if row["structured_insights"]:
+                try:
+                    structured_insights = json.loads(row["structured_insights"])
+                except (json.JSONDecodeError, TypeError):
+                    logger.warning(
+                        "Failed to parse structured_insights for snapshot %s (user %s)",
+                        row["id"],
+                        user_id,
+                    )
+
             profiles.append(ProfileSnapshotResponse(
                 id=row["id"],
                 scores=json.loads(row["scores"]) if row["scores"] else None,
                 quadrant_placement=qp,
                 quadrant=quadrant_name,
                 interpretation=row["interpretation"],
+                structured_insights=structured_insights,
                 has_spider_chart=row["spider_chart"] is not None,
                 spider_data=spider_data,
                 flow_data=flow_data,
