@@ -319,11 +319,26 @@ const Chat = (() => {
         html = html.replace(/```(\w*)\n?([\s\S]*?)```/g, '<pre><code>$2</code></pre>');
         // Inline code
         html = html.replace(/`([^`]+)`/g, '<code>$1</code>');
-        // Headers (### and ####)
+        // Headers (#, ##, ###, ####). Longest fences first so e.g. "### x"
+        // is not matched by the "## " rule (## requires a space after, which
+        // "###" lacks) — order is belt-and-suspenders.
         html = html.replace(/^#### (.+)$/gm, '<h4>$1</h4>');
         html = html.replace(/^### (.+)$/gm, '<h3>$1</h3>');
+        html = html.replace(/^## (.+)$/gm, '<h2>$1</h2>');
+        html = html.replace(/^# (.+)$/gm, '<h1>$1</h1>');
         // Horizontal rules
         html = html.replace(/^---+$/gm, '<br>');
+        // Blockquotes: collapse consecutive lines starting with ">" into a
+        // single <blockquote>. Inner content (bold, lists) is handled by the
+        // passes below, so this must run before bold/list processing.
+        html = html.replace(/(?:^|\n)((?:>[^\n]*(?:\n|$))+)/g, (_, block) => {
+            const inner = block.replace(/\n+$/, '').split('\n')
+                .map(line => line.replace(/^>\s?/, ''))
+                .join('\n');
+            // Keep the closing tag on its own line so the list/paragraph passes
+            // below don't swallow "</blockquote>" into the final <li>.
+            return '\n<blockquote>\n' + inner + '\n</blockquote>\n';
+        });
         // Bold + italic
         html = html.replace(/\*\*\*(.+?)\*\*\*/g, '<strong><em>$1</em></strong>');
         // Bold
