@@ -348,12 +348,10 @@ const Results = (() => {
         Sanitize.setText(header, 'Your Profile');
         el.appendChild(header);
 
-        // Quadrant name — from SSE (data.quadrant string) or API (data.quadrant_placement.quadrant)
-        const quadrantName = typeof data.quadrant === 'string'
-            ? data.quadrant
-            : (data.quadrant_placement && data.quadrant_placement.quadrant)
-              ? data.quadrant_placement.quadrant
-              : null;
+        // Archetype name — snapshots store it at quadrant_placement.archetype
+        // (lowercase, e.g. "magnifier"); older payloads used data.quadrant or
+        // quadrant_placement.quadrant. _archetypeName normalizes all of these.
+        const quadrantName = _archetypeName(data);
 
         if (quadrantName) {
             const quad = document.createElement('div');
@@ -374,14 +372,12 @@ const Results = (() => {
             el.appendChild(syn);
         }
 
-        // Transmute graph — collapsible: archetype description + quadrant chart
+        // Transmute graph — collapsible: result-specific description + quadrant chart
         const transmuteBody = _renderCollapsibleSection(el, 'Your Transmute Pattern', false);
-        if (quadrantName) {
-            const tDesc = document.createElement('p');
-            tDesc.className = 'profile-collapsible__desc';
-            Sanitize.setText(tDesc, ARCHETYPE_DESCRIPTIONS[quadrantName] || DEFAULT_ARCHETYPE_DESC);
-            transmuteBody.appendChild(tDesc);
-        }
+        const tDesc = document.createElement('p');
+        tDesc.className = 'profile-collapsible__desc';
+        Sanitize.setText(tDesc, _buildTransmuteDescription(data));
+        transmuteBody.appendChild(tDesc);
         const chartContainer = document.createElement('div');
         transmuteBody.appendChild(chartContainer);
         if (typeof QuadrantChart !== 'undefined') {
@@ -392,7 +388,7 @@ const Results = (() => {
         const spiderBody = _renderCollapsibleSection(el, 'Awareness & Transmute Capacity Profile', false);
         const sDesc = document.createElement('p');
         sDesc.className = 'profile-collapsible__desc';
-        Sanitize.setText(sDesc, SPIDER_DESCRIPTION);
+        Sanitize.setText(sDesc, _buildSpiderDescription(data));
         spiderBody.appendChild(sDesc);
         if (data.spider_data && data.spider_data.image_base64) {
             const img = document.createElement('img');
@@ -518,18 +514,118 @@ const Results = (() => {
 
     }
 
-    // Plain-language descriptions of each transmute archetype, keyed by the
-    // names produced by QuadrantChart._getArchetype. No-shame framing: every
-    // pattern is described as a current operating mode, not a verdict.
+    // Meaning of each transmute archetype, written as a continuation so it can
+    // follow "Your pattern is <Name> — ". No-shame framing: a current operating
+    // mode, not a verdict. Keyed by the names QuadrantChart._getArchetype uses.
     const ARCHETYPE_DESCRIPTIONS = {
-        Transmuter: 'As a Transmuter, you tend to filter deprivation AND amplify fulfillment — you break difficult cycles and spread the good. This is the pattern most development work aims toward.',
-        Absorber: 'As an Absorber, you tend to filter deprivation but keep fulfillment private — you take on others’ pain to protect them, yet hold your own joy close. The growth edge is letting more of your fulfillment flow outward.',
-        Magnifier: 'As a Magnifier, you amplify what you receive — both the good and the difficult. You’re a person of real presence who moves things; when you’re around good energy you spread it, and hard energy can move through you too. The development work ahead is building your filtering capacity so you can choose what you amplify.',
-        Extractor: 'As an Extractor, you currently tend to amplify deprivation while keeping fulfillment for yourself. These patterns usually develop for good reasons — survival, protection. The growth edge is filtering what you pass on and sharing more of the good.',
-        Conduit: 'As a Conduit, you mostly pass through what you receive without significantly transforming it. This is the morally-neutral baseline — where most people operate most of the time. It’s a solid place to build deliberate filtering and amplification from.'
+        Transmuter: 'you tend to filter deprivation AND amplify fulfillment — breaking difficult cycles and spreading the good. This is the pattern most development work aims toward.',
+        Absorber: 'you tend to filter deprivation but keep fulfillment private — taking on others’ pain to protect them, while holding your own joy close. The growth edge is letting more of your fulfillment flow outward.',
+        Magnifier: 'you amplify what you receive — both the good and the difficult. You’re a person of real presence who moves things; when you’re around good energy you spread it, and hard energy can move through you too. The work ahead is building your filtering capacity so you can choose what you amplify.',
+        Extractor: 'you currently tend to amplify deprivation while keeping fulfillment for yourself. These patterns usually develop for good reasons — survival, protection. The growth edge is filtering what you pass on and sharing more of the good.',
+        Conduit: 'you mostly pass through what you receive without significantly transforming it — the morally-neutral baseline where most people operate most of the time. It’s a solid place to build deliberate filtering and amplification from.'
     };
-    const DEFAULT_ARCHETYPE_DESC = 'Your transmute pattern describes how you tend to handle deprivation and fulfillment — what you filter, what you pass through, and what you amplify outward.';
-    const SPIDER_DESCRIPTION = 'This radar maps your awareness capacity across every dimension. Points further from the center are areas of strength; points closer in are opportunities to grow. The overall shape shows how balanced your awareness is right now — a snapshot, not a verdict.';
+    const DEFAULT_ARCHETYPE_DESC = 'your transmute pattern describes how you tend to handle deprivation and fulfillment — what you filter, what you pass through, and what you amplify outward.';
+    const SPIDER_DESCRIPTION = 'This radar maps your awareness capacity across every dimension. Points further from the center are areas of strength; points closer in are opportunities to grow.';
+
+    /** Round to 2 decimals for display. */
+    function _round2(n) { return Math.round((Number(n) || 0) * 100) / 100; }
+
+    // The five transmute archetypes (matches QuadrantChart._getArchetype).
+    const ARCHETYPE_KEYS = ['Transmuter', 'Absorber', 'Magnifier', 'Extractor', 'Conduit'];
+
+    /** Raw archetype string from whichever field the snapshot carries. */
+    function _archetypeRaw(data) {
+        const qp = (data && data.quadrant_placement) || {};
+        return (typeof data.quadrant === 'string' && data.quadrant)
+            || qp.quadrant || qp.archetype || null;
+    }
+
+    /**
+     * Human-facing archetype label for display. Keeps an already-formatted
+     * string ("The Magnifier") as-is; capitalizes a bare lowercase word
+     * ("magnifier" -> "Magnifier", as stored in quadrant_placement.archetype).
+     */
+    function _archetypeName(data) {
+        const raw = _archetypeRaw(data);
+        if (!raw) return null;
+        const s = String(raw).trim();
+        return /^[a-z]+$/.test(s) ? s.charAt(0).toUpperCase() + s.slice(1) : s;
+    }
+
+    /**
+     * Normalized archetype KEY for ARCHETYPE_DESCRIPTIONS lookup. Finds the
+     * known archetype word inside the raw string ("The Magnifier" -> "Magnifier",
+     * "magnifier (medium)" -> "Magnifier"). Returns null if none match.
+     */
+    function _archetypeKey(data) {
+        const raw = _archetypeRaw(data);
+        if (!raw) return null;
+        const lower = String(raw).toLowerCase();
+        for (let i = 0; i < ARCHETYPE_KEYS.length; i++) {
+            if (lower.indexOf(ARCHETYPE_KEYS[i].toLowerCase()) !== -1) return ARCHETYPE_KEYS[i];
+        }
+        return null;
+    }
+
+    /** Extract sorted [name, score] pairs from a dimension's sub_dimensions. */
+    function _subDimPairs(dimEntry) {
+        const subs = dimEntry && dimEntry.sub_dimensions;
+        if (!subs || typeof subs !== 'object') return [];
+        return Object.entries(subs)
+            .map(([k, v]) => [k, typeof v === 'object' ? (v.score || 0) : (v || 0)])
+            .filter(function (p) { return p[1] > 0; })
+            .sort(function (a, b) { return b[1] - a[1]; });
+    }
+
+    /**
+     * Build a description of the user's ACTUAL transmute result: their archetype
+     * + confidence, what it means, and the specific Transmutation Capacity
+     * sub-scores that drove the placement.
+     */
+    function _buildTransmuteDescription(data) {
+        const name = _archetypeName(data);
+        const key = _archetypeKey(data);
+        const qp = (data && data.quadrant_placement) || {};
+        const meaning = (key && ARCHETYPE_DESCRIPTIONS[key]) || DEFAULT_ARCHETYPE_DESC;
+        let text;
+        if (name) {
+            const conf = qp.confidence ? ' (' + qp.confidence + ' confidence)' : '';
+            text = 'Your pattern is ' + name + conf + ' — ' + meaning;
+        } else {
+            text = meaning.charAt(0).toUpperCase() + meaning.slice(1);
+        }
+        const pairs = _subDimPairs(data.scores && data.scores['Transmutation Capacity']);
+        if (pairs.length >= 2) {
+            const hi = pairs[0];
+            const lo = pairs[pairs.length - 1];
+            text += ' This shows in your results: ' + hi[0] + ' is your strongest transmute capacity ('
+                + _round2(hi[1]) + '/5), while ' + lo[0] + ' has the most room to grow ('
+                + _round2(lo[1]) + '/5).';
+        }
+        return text;
+    }
+
+    /**
+     * Build a description of the user's ACTUAL spider-chart result: which
+     * awareness dimensions are highest and lowest.
+     */
+    function _buildSpiderDescription(data) {
+        const scores = data && data.scores;
+        if (!scores || typeof scores !== 'object') return SPIDER_DESCRIPTION;
+        const dims = Object.entries(scores)
+            .map(([k, v]) => [k, typeof v === 'object' ? (v.score || 0) : (v || 0)])
+            .filter(function (p) { return p[1] > 0; })
+            .sort(function (a, b) { return b[1] - a[1]; });
+        if (dims.length < 2) return SPIDER_DESCRIPTION;
+        const fmt = function (arr) {
+            return arr.map(function (p) { return p[0] + ' (' + _round2(p[1]) + ')'; }).join(', ');
+        };
+        const top = dims.slice(0, 3);
+        const bottom = dims.slice(-3).reverse();
+        return 'Your awareness is strongest in ' + fmt(top)
+            + ', and has the most room to grow in ' + fmt(bottom)
+            + '. On the radar, points further from the center are your strengths; points closer in are growth areas.';
+    }
 
     let _collapsibleSeq = 0;
 
