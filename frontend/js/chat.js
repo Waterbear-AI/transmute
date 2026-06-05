@@ -623,6 +623,7 @@ const Chat = (() => {
     const _CONTROL_MESSAGE_TYPES = new Set([
         'comprehension_answer',  // StructuredChoice
         'batch_complete',        // LikertCard
+        'continue',              // ContinuePrompt
     ]);
 
     // Returns true when `text` is a JSON control payload that should be hidden

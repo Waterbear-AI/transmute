@@ -124,11 +124,14 @@ test.describe('Continue prompt widget (education.continue)', () => {
         await expect(page.locator('.continue-prompt-btn')).toHaveCount(0);
         await expect(page.locator('.continue-prompt')).toHaveCount(0);
 
-        // Chat.sendMessage was called with the agent-supplied message
+        // Chat.sendMessage was called with a structured control payload that
+        // carries the agent-supplied message (so it can be suppressed on reload)
         const sent = await page.evaluate(() => window._sentMessages);
         expect(sent).toHaveLength(1);
         expect(sent[0].sessionId).toBe('s1');
-        expect(sent[0].message).toBe('Yes, continue to Category 2');
+        const payload = JSON.parse(sent[0].message);
+        expect(payload.type).toBe('continue');
+        expect(payload.message).toBe('Yes, continue to Category 2');
 
         // No user-message bubble is rendered for the silent continue send
         await expect(page.locator('.chat-msg--user')).toHaveCount(0);
@@ -156,6 +159,30 @@ test.describe('Continue prompt widget (education.continue)', () => {
         await btn.click();
         const sent = await page.evaluate(() => window._sentMessages);
         expect(sent).toHaveLength(1);
-        expect(sent[0].message).toBe('continue');
+        const payload = JSON.parse(sent[0].message);
+        expect(payload.type).toBe('continue');
+        expect(payload.message).toBe('continue');
+    });
+
+    // ── Reload: the continue control message is suppressed in history ──────────
+
+    test('cont-04: a continue control message is NOT rendered as a user bubble on reload', async ({ page }) => {
+        await page.evaluate(() => {
+            Chat.renderHistory([
+                { role: 'agent', text: 'Ready to move into Category 2?' },
+                {
+                    role: 'user',
+                    text: JSON.stringify({ type: 'continue', message: 'Yes, continue to Category 2: Your Score' }),
+                },
+                { role: 'agent', text: 'Great — Category 2: Your Score.' },
+            ]);
+        });
+
+        // No user bubble, and the raw JSON / "Yes, continue" text must not appear
+        await expect(page.locator('.chat-msg--user')).toHaveCount(0);
+        await expect(page.locator('.chat-messages')).not.toContainText('"type":"continue"');
+        await expect(page.locator('.chat-messages')).not.toContainText('Yes, continue to Category 2');
+        // Surrounding agent messages still render
+        await expect(page.locator('.chat-msg--agent')).toHaveCount(2);
     });
 });

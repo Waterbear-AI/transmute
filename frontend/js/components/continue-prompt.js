@@ -9,9 +9,13 @@ const ContinuePrompt = (() => {
      *
      * Renders a single primary button. When the user clicks it (or activates
      * via Enter/Space — native <button> behavior), the button is removed from
-     * the DOM and `message` is sent back to the agent via Chat.sendMessage
-     * (which does NOT render a user-message bubble). The button cannot be
-     * double-submitted because it removes itself on the first activation.
+     * the DOM and a `continue` control message is sent back to the agent via
+     * Chat.sendMessage (which does NOT render a user-message bubble). The
+     * message is JSON-encoded as {type:'continue', message} so that, like the
+     * comprehension_answer payload, it is suppressed from the transcript on
+     * reload instead of appearing as a raw "Yes, continue…" user bubble.
+     * The button cannot be double-submitted because it removes itself on the
+     * first activation.
      */
     function create(data) {
         data = data || {};
@@ -39,7 +43,14 @@ const ContinuePrompt = (() => {
             card.remove();
 
             if (sessionId && typeof Chat !== 'undefined') {
-                Chat.sendMessage(sessionId, message);
+                // Structured control payload (not raw text) so history
+                // rehydration can suppress it — see _CONTROL_MESSAGE_TYPES in
+                // chat.js. The `message` field carries the natural-language
+                // confirmation the agent reads to proceed.
+                Chat.sendMessage(sessionId, JSON.stringify({
+                    type: 'continue',
+                    message: message,
+                }));
             }
         });
 
