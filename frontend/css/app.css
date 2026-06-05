@@ -1349,9 +1349,9 @@ body {
 }
 .profile-collapsible__chevron {
     display: inline-block;
-    width: 20px;
+    width: 16px;
     flex: 0 0 auto;
-    font-size: 22px;
+    font-size: 15px;
     line-height: 1;
     color: var(--color-text-muted);
     transition: color 0.15s;
