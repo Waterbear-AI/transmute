@@ -12,6 +12,17 @@ const Results = (() => {
         { id: 'graduation', label: 'Graduation', color: 'var(--phase-graduation)', dataKey: 'graduation_data' }
     ];
 
+    // Canonical 5 education categories per dimension, in teaching order.
+    // Mirrors EDUCATION_CATEGORIES in agents/transmutation/tools.py — keep in
+    // sync. Every dimension always shows all 5 (untouched ones render at 0%).
+    const EDUCATION_CATEGORIES = [
+        { key: 'what_this_means', label: 'What This Means' },
+        { key: 'your_score', label: 'Your Score' },
+        { key: 'daily_effects', label: 'Daily Effects' },
+        { key: 'strengths_gaps', label: 'Strengths & Gaps' },
+        { key: 'external_interaction', label: 'External Interaction' },
+    ];
+
     let _currentPhase = 'orientation';
     let _activeTab = 'orientation';
     let _resultsData = {};
@@ -796,15 +807,19 @@ const Results = (() => {
                 Sanitize.setText(dimLabel, dim);
                 dimEl.appendChild(dimLabel);
 
-                for (const [catName, catData] of Object.entries(cats)) {
+                // Always render all 5 canonical categories in teaching order,
+                // even ones the user hasn't reached yet (they show 0%), so the
+                // tab reflects the full dimension — e.g. "Category 5: External
+                // Interaction" is visible before it's started.
+                EDUCATION_CATEGORIES.forEach((cat, i) => {
+                    const catData = cats[cat.key] || {};
                     const catEl = document.createElement('div');
                     catEl.style.margin = '4px 0 4px 12px';
                     const score = catData.understanding_score || 0;
-                    const label = catName.replace(/_/g, ' ');
-                    Sanitize.setText(catEl, label + ': ' + score + '%');
+                    Sanitize.setText(catEl, (i + 1) + '. ' + cat.label + ': ' + score + '%');
                     dimEl.appendChild(catEl);
                     dimEl.appendChild(_createProgressBar(score / 100));
-                }
+                });
 
                 el.appendChild(dimEl);
             }

@@ -41,6 +41,22 @@ ALLOWED_TRANSITIONS = {
 }
 
 
+# ── Education categories ───────────────────────────────────────────────
+# The canonical 5 categories covered per dimension in the education phase,
+# in teaching order. Single source of truth for the completion gate, the
+# progress summary, and (mirrored) the frontend progress tab. Each entry is
+# (key, display_label). Keep the keys in sync with data/comprehension_checks.json
+# and the labels in sync with frontend/js/results.js EDUCATION_CATEGORIES.
+EDUCATION_CATEGORIES = [
+    ("what_this_means", "What This Means"),
+    ("your_score", "Your Score"),
+    ("daily_effects", "Daily Effects"),
+    ("strengths_gaps", "Strengths & Gaps"),
+    ("external_interaction", "External Interaction"),
+]
+EDUCATION_CATEGORY_KEYS = [key for key, _ in EDUCATION_CATEGORIES]
+
+
 # ── Exit-gate thresholds (normalized 0–100 scale) ──────────────────────
 # These thresholds are compared against scores mapped to 0–100 via
 # scoring_engine.normalize_score(score, lo=1.0, hi=5.0). The underlying
@@ -355,10 +371,7 @@ def _check_education_completion_gate(conn, user_id: str) -> Optional[dict]:
     )
     top3_dims = [dim for dim, _ in ranked[:3]]
 
-    required_categories = [
-        "what_this_means", "your_score", "daily_effects",
-        "strengths_gaps", "external_interaction",
-    ]
+    required_categories = EDUCATION_CATEGORY_KEYS
 
     qb = get_question_bank()
     for dim in top3_dims:
@@ -1073,13 +1086,20 @@ def get_education_progress(user_id: str) -> dict[str, Any]:
 
     progress = json.loads(row["progress"] or "{}")
 
-    # Compute summary stats
+    # Compute summary stats. Each started dimension always contributes the full
+    # set of canonical categories to the denominator (not just the categories
+    # the user has happened to touch), so an untouched category like
+    # external_interaction still counts as 1 incomplete category of 5 rather
+    # than vanishing from the total. completed = canonical categories at the
+    # >= 70 understanding threshold.
+    per_dim = len(EDUCATION_CATEGORY_KEYS)
     total_categories = 0
     completed_categories = 0
     for dim, categories in progress.items():
-        for cat, data in categories.items():
-            total_categories += 1
-            if data.get("understanding_score", 0) >= 70:
+        total_categories += per_dim
+        for cat in EDUCATION_CATEGORY_KEYS:
+            score = categories.get(cat, {}).get("understanding_score", 0)
+            if score >= 70:
                 completed_categories += 1
 
     return {

@@ -138,13 +138,16 @@ class TestGetEducationProgress:
     def test_summary_computation(self):
         uid = _create_user()
         with get_db_session() as conn:
+            # Two started dimensions. Untouched canonical categories (e.g.
+            # external_interaction) are absent from the JSON but must still
+            # count toward the denominator (5 per started dimension).
             progress = {
-                "dim1": {
-                    "cat1": {"understanding_score": 80},
-                    "cat2": {"understanding_score": 50},
+                "Emotional Awareness": {
+                    "what_this_means": {"understanding_score": 80},
+                    "your_score": {"understanding_score": 50},
                 },
-                "dim2": {
-                    "cat1": {"understanding_score": 90},
+                "Social Awareness": {
+                    "what_this_means": {"understanding_score": 90},
                 },
             }
             conn.execute(
@@ -154,9 +157,35 @@ class TestGetEducationProgress:
 
         result = get_education_progress(uid)
         assert result["exists"] is True
-        # 2 of 3 categories >= 70 (80, 90)
+        # 2 canonical categories >= 70 (the two 80/90 what_this_means scores).
         assert result["summary"]["completed_categories"] == 2
-        assert result["summary"]["total_categories"] == 3
+        # Denominator is 5 canonical categories per started dimension (2 dims).
+        assert result["summary"]["total_categories"] == 10
+        assert result["summary"]["completion_pct"] == 20.0
+
+    def test_summary_counts_all_five_canonical_categories_per_dimension(self):
+        """A single fully-taught dimension reports 5/5, not 3/3 or 4/4."""
+        uid = _create_user()
+        with get_db_session() as conn:
+            progress = {
+                "Emotional Awareness": {
+                    "what_this_means": {"understanding_score": 100},
+                    "your_score": {"understanding_score": 100},
+                    "daily_effects": {"understanding_score": 100},
+                    "strengths_gaps": {"understanding_score": 0},
+                    # external_interaction not yet started — absent from JSON
+                },
+            }
+            conn.execute(
+                "INSERT INTO education_progress (user_id, progress) VALUES (?, ?)",
+                (uid, json.dumps(progress)),
+            )
+
+        result = get_education_progress(uid)
+        # 3 of the 5 canonical categories are complete; total is 5 (not 4).
+        assert result["summary"]["completed_categories"] == 3
+        assert result["summary"]["total_categories"] == 5
+        assert result["summary"]["completion_pct"] == 60.0
 
 
 # ── TEST-002: Development Agent tools ──
