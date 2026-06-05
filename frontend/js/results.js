@@ -374,21 +374,33 @@ const Results = (() => {
             el.appendChild(syn);
         }
 
-        // Quadrant chart (Transmute graph) — rendered above the spider chart
+        // Transmute graph — collapsible: archetype description + quadrant chart
+        const transmuteBody = _renderCollapsibleSection(el, 'Your Transmute Pattern', false);
+        if (quadrantName) {
+            const tDesc = document.createElement('p');
+            tDesc.className = 'profile-collapsible__desc';
+            Sanitize.setText(tDesc, ARCHETYPE_DESCRIPTIONS[quadrantName] || DEFAULT_ARCHETYPE_DESC);
+            transmuteBody.appendChild(tDesc);
+        }
         const chartContainer = document.createElement('div');
-        el.appendChild(chartContainer);
+        transmuteBody.appendChild(chartContainer);
         if (typeof QuadrantChart !== 'undefined') {
             QuadrantChart.render(chartContainer, data.quadrant_placement || null, data.flow_data || null);
         }
 
-        // Spider chart image — from SSE (data.spider_data.image_base64)
+        // Awareness & Transmute Capacity Profile — collapsible: description + spider chart
+        const spiderBody = _renderCollapsibleSection(el, 'Awareness & Transmute Capacity Profile', false);
+        const sDesc = document.createElement('p');
+        sDesc.className = 'profile-collapsible__desc';
+        Sanitize.setText(sDesc, SPIDER_DESCRIPTION);
+        spiderBody.appendChild(sDesc);
         if (data.spider_data && data.spider_data.image_base64) {
             const img = document.createElement('img');
             img.src = 'data:image/png;base64,' + data.spider_data.image_base64;
             img.alt = 'Awareness capacity spider chart';
             img.style.maxWidth = '100%';
             img.style.marginTop = '12px';
-            el.appendChild(img);
+            spiderBody.appendChild(img);
         }
 
         // Structured insight sections (strengths, growth areas, cross-dimensional)
@@ -469,12 +481,9 @@ const Results = (() => {
             }
         }
 
-        // Dimension scores breakdown
+        // Dimension scores breakdown — collapsible
         if (data.scores) {
-            const scoresHeader = document.createElement('h4');
-            scoresHeader.className = 'profile-section__title';
-            Sanitize.setText(scoresHeader, 'Dimension Scores');
-            el.appendChild(scoresHeader);
+            const scoresBody = _renderCollapsibleSection(el, 'Dimension Scores', false);
 
             for (const [dim, dimData] of Object.entries(data.scores)) {
                 const row = document.createElement('div');
@@ -503,29 +512,99 @@ const Results = (() => {
                     _renderSubDimensionBars(row, dimData);
                 }
 
-                el.appendChild(row);
+                scoresBody.appendChild(row);
             }
         }
 
     }
 
+    // Plain-language descriptions of each transmute archetype, keyed by the
+    // names produced by QuadrantChart._getArchetype. No-shame framing: every
+    // pattern is described as a current operating mode, not a verdict.
+    const ARCHETYPE_DESCRIPTIONS = {
+        Transmuter: 'As a Transmuter, you tend to filter deprivation AND amplify fulfillment — you break difficult cycles and spread the good. This is the pattern most development work aims toward.',
+        Absorber: 'As an Absorber, you tend to filter deprivation but keep fulfillment private — you take on others’ pain to protect them, yet hold your own joy close. The growth edge is letting more of your fulfillment flow outward.',
+        Magnifier: 'As a Magnifier, you amplify what you receive — both the good and the difficult. You’re a person of real presence who moves things; when you’re around good energy you spread it, and hard energy can move through you too. The development work ahead is building your filtering capacity so you can choose what you amplify.',
+        Extractor: 'As an Extractor, you currently tend to amplify deprivation while keeping fulfillment for yourself. These patterns usually develop for good reasons — survival, protection. The growth edge is filtering what you pass on and sharing more of the good.',
+        Conduit: 'As a Conduit, you mostly pass through what you receive without significantly transforming it. This is the morally-neutral baseline — where most people operate most of the time. It’s a solid place to build deliberate filtering and amplification from.'
+    };
+    const DEFAULT_ARCHETYPE_DESC = 'Your transmute pattern describes how you tend to handle deprivation and fulfillment — what you filter, what you pass through, and what you amplify outward.';
+    const SPIDER_DESCRIPTION = 'This radar maps your awareness capacity across every dimension. Points further from the center are areas of strength; points closer in are opportunities to grow. The overall shape shows how balanced your awareness is right now — a snapshot, not a verdict.';
+
+    let _collapsibleSeq = 0;
+
     /**
-     * Render a titled insight section (Strengths, Growth Areas, Cross-Dimensional Insights).
+     * Render a collapsible section: a heading with a real <button> toggle
+     * (keyboard-operable, aria-expanded) and a body the caller fills. Mirrors
+     * the Likert batch collapse UX for consistency. Returns the body element.
+     * @param {Element} parentEl - Container to append the section into.
+     * @param {string} title - Section title (may include a decorative emoji).
+     * @param {boolean} startCollapsed - If true, render initially collapsed.
+     * @param {string} [extraClass] - Optional extra class on the section element
+     *   (e.g. 'profile-insight-section' so existing selectors/tests still match).
+     * @returns {Element} the body element to append content into.
+     */
+    function _renderCollapsibleSection(parentEl, title, startCollapsed, extraClass) {
+        const section = document.createElement('section');
+        section.className = 'profile-collapsible';
+        if (extraClass) section.classList.add(extraClass);
+        if (startCollapsed) section.classList.add('profile-collapsible--collapsed');
+
+        // Heading wraps a button (WAI-ARIA disclosure pattern): keep heading
+        // semantics on <h4>, put the interactive role on the nested <button>.
+        const heading = document.createElement('h4');
+        heading.className = 'profile-collapsible__heading';
+
+        const toggle = document.createElement('button');
+        toggle.type = 'button';
+        toggle.className = 'profile-collapsible__toggle';
+        toggle.setAttribute('aria-expanded', startCollapsed ? 'false' : 'true');
+
+        const chevron = document.createElement('span');
+        chevron.className = 'profile-collapsible__chevron';
+        chevron.setAttribute('aria-hidden', 'true');
+        chevron.textContent = startCollapsed ? '▸' : '▾';  // ▸ / ▾
+        toggle.appendChild(chevron);
+
+        const titleSpan = document.createElement('span');
+        titleSpan.className = 'profile-collapsible__title';
+        // Strip decorative emoji from the accessible name.
+        toggle.setAttribute('aria-label', title.replace(/[\u{1F000}-\u{1FFFF}]|[☀-⛿]|[✀-➿]|️/gu, '').trim());
+        Sanitize.setText(titleSpan, title);
+        toggle.appendChild(titleSpan);
+
+        heading.appendChild(toggle);
+        section.appendChild(heading);
+
+        const body = document.createElement('div');
+        body.className = 'profile-collapsible__body';
+        const bodyId = 'profile-collapsible-' + (++_collapsibleSeq);
+        body.id = bodyId;
+        toggle.setAttribute('aria-controls', bodyId);
+        section.appendChild(body);
+
+        toggle.addEventListener('click', () => {
+            const collapsed = section.classList.toggle('profile-collapsible--collapsed');
+            toggle.setAttribute('aria-expanded', collapsed ? 'false' : 'true');
+            chevron.textContent = collapsed ? '▸' : '▾';
+        });
+
+        parentEl.appendChild(section);
+        return body;
+    }
+
+    /**
+     * Render a titled, collapsible insight section (Strengths, Growth Areas,
+     * Cross-Dimensional Insights).
      * @param {Element} parentEl - Container to append the section into.
      * @param {string} title - Section title text (may include emoji).
      * @param {Array} items - Array of items to render.
      * @param {Function} renderItemFn - (item, index) => HTMLElement for each item.
      */
     function _renderInsightSection(parentEl, title, items, renderItemFn) {
-        const section = document.createElement('div');
-        section.className = 'profile-insight-section';
-
-        const heading = document.createElement('h4');
-        heading.className = 'profile-insight-section__title';
-        // Emoji in title is decorative — aria-hidden keeps it out of screen reader announcements
-        heading.setAttribute('aria-label', title.replace(/[\u{1F000}-\u{1FFFF}]|[☀-⛿]|[✀-➿]|️/gu, '').trim());
-        Sanitize.setText(heading, title);
-        section.appendChild(heading);
+        // Keep the 'profile-insight-section' class so existing selectors/e2e
+        // locators (which filter by it) continue to match the section.
+        const body = _renderCollapsibleSection(parentEl, title, false, 'profile-insight-section');
 
         const list = document.createElement('ul');
         list.className = 'profile-insight-section__list';
@@ -535,8 +614,7 @@ const Results = (() => {
             if (el) list.appendChild(el);
         });
 
-        section.appendChild(list);
-        parentEl.appendChild(section);
+        body.appendChild(list);
     }
 
     /**
