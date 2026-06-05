@@ -16,6 +16,7 @@ from api.auth import get_current_user_id
 from agents.transmutation.agent import create_transmutation_agent
 from agents.transmutation.session_service import SqliteSessionService
 from config import get_settings
+from db.database import get_db_session
 from rate_limit import limiter
 from google.adk.models import LLMRegistry
 from google.adk.models.lite_llm import LiteLlm
@@ -96,18 +97,38 @@ async def _stream_agent_response(
     total_output_tokens = 0
     message_chunks: list[str] = []
 
+    # Read current_phase once per turn to avoid N+1 queries inside the loop.
+    current_phase = _get_user_phase(user_id)
+
     try:
         async for event in _runner.run_async(
             user_id=user_id,
             session_id=session_id,
             new_message=content,
         ):
-            # Track token usage
+            # Track token usage and record per-call LLM cost
             if event.usage_metadata:
-                if event.usage_metadata.prompt_token_count:
-                    total_input_tokens += event.usage_metadata.prompt_token_count
-                if event.usage_metadata.candidates_token_count:
-                    total_output_tokens += event.usage_metadata.candidates_token_count
+                event_input = event.usage_metadata.prompt_token_count or 0
+                event_output = event.usage_metadata.candidates_token_count or 0
+                if event_input:
+                    total_input_tokens += event_input
+                if event_output:
+                    total_output_tokens += event_output
+
+                # Only record calls that actually consumed tokens (zero-token
+                # events are infra events, not real model calls).
+                if event_input or event_output:
+                    call_cost = _estimate_cost(event_input, event_output)
+                    _session_service.record_llm_call(
+                        session_id=session_id,
+                        user_id=user_id,
+                        author=event.author,
+                        phase=current_phase,
+                        model_id=_model_cfg.model_id,
+                        input_tokens=event_input,
+                        output_tokens=event_output,
+                        cost_usd=call_cost,
+                    )
 
             # Handle errors
             if event.error_code or event.error_message:
@@ -192,6 +213,23 @@ async def _stream_agent_response(
     except Exception:
         logger.warning("Failed to compute user total cost for %s", user_id, exc_info=True)
     yield _sse_event("session.cost", cost_payload)
+
+
+def _get_user_phase(user_id: str) -> str | None:
+    """Return the user's current_phase from the users table.
+
+    Read once per turn (anti-patterns-n-plus-one-queries) rather than inside
+    the event loop. Returns None if the user row is not found (best-effort).
+    """
+    try:
+        with get_db_session() as conn:
+            row = conn.execute(
+                "SELECT current_phase FROM users WHERE id = ?", (user_id,)
+            ).fetchone()
+        return row["current_phase"] if row else None
+    except Exception:
+        logger.warning("Failed to fetch current_phase for user %s", user_id, exc_info=True)
+        return None
 
 
 def _estimate_cost(input_tokens: int, output_tokens: int) -> float:
