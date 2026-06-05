@@ -374,6 +374,13 @@ const Results = (() => {
             el.appendChild(syn);
         }
 
+        // Quadrant chart (Transmute graph) — rendered above the spider chart
+        const chartContainer = document.createElement('div');
+        el.appendChild(chartContainer);
+        if (typeof QuadrantChart !== 'undefined') {
+            QuadrantChart.render(chartContainer, data.quadrant_placement || null, data.flow_data || null);
+        }
+
         // Spider chart image — from SSE (data.spider_data.image_base64)
         if (data.spider_data && data.spider_data.image_base64) {
             const img = document.createElement('img');
@@ -500,12 +507,6 @@ const Results = (() => {
             }
         }
 
-        // Quadrant chart
-        const chartContainer = document.createElement('div');
-        el.appendChild(chartContainer);
-        if (typeof QuadrantChart !== 'undefined') {
-            QuadrantChart.render(chartContainer, data.quadrant_placement || null, data.flow_data || null);
-        }
     }
 
     /**
