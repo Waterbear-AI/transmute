@@ -7,6 +7,7 @@ from agents.transmutation.tools import (
     get_education_progress,
     present_comprehension_question,
     record_comprehension_answer,
+    present_continue_prompt,
     advance_phase,
     flag_safety_concern,
 )
@@ -32,6 +33,7 @@ def create_education_agent(model: str = "") -> LlmAgent:
             get_education_progress,
             present_comprehension_question,
             record_comprehension_answer,
+            present_continue_prompt,
             advance_phase,
             flag_safety_concern,
         ],

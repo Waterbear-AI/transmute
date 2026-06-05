@@ -294,6 +294,13 @@ const Chat = (() => {
                 }
                 break;
 
+            case 'education.continue':
+                // Interactive "Continue" button — replaces free-text
+                // "ready to continue?" prompts. ContinuePrompt defaults
+                // label/message, so a sparse payload still renders safely.
+                _pendingWidgets.push(() => ContinuePrompt.create(data));
+                break;
+
             case 'assessment.progress':
             case 'profile.snapshot':
             case 'education.progress':
@@ -313,6 +320,51 @@ const Chat = (() => {
     }
 
     // ── Markdown conversion ──────────────────────
+
+    /**
+     * Split a markdown table row into trimmed cell strings, dropping the
+     * outer leading/trailing pipes (e.g. "| a | b |" -> ["a", "b"]).
+     */
+    function _splitTableRow(line) {
+        return line.trim().replace(/^\|/, '').replace(/\|$/, '').split('|')
+            .map(cell => cell.trim());
+    }
+
+    /**
+     * Convert GFM tables to <table> HTML. A table is a header row, a
+     * delimiter row (pipes + dashes, e.g. "|---|---|"), and zero or more
+     * body rows — all lines starting with "|". Non-table lines pass through
+     * unchanged. Each table collapses to a single line so the downstream
+     * newline->br pass leaves it alone.
+     */
+    function _tablesToHTML(text) {
+        const isRow = line => /^\s*\|.*\|\s*$/.test(line);
+        const isDelim = line => /^\s*\|(?:\s*:?-+:?\s*\|)+\s*$/.test(line);
+        const lines = text.split('\n');
+        const out = [];
+        let i = 0;
+        while (i < lines.length) {
+            if (isRow(lines[i]) && i + 1 < lines.length && isDelim(lines[i + 1])) {
+                const header = _splitTableRow(lines[i]);
+                i += 2; // consume header + delimiter
+                const body = [];
+                while (i < lines.length && isRow(lines[i]) && !isDelim(lines[i])) {
+                    body.push(_splitTableRow(lines[i]));
+                    i += 1;
+                }
+                const thead = '<thead><tr>' +
+                    header.map(c => '<th>' + c + '</th>').join('') + '</tr></thead>';
+                const tbody = '<tbody>' + body.map(row =>
+                    '<tr>' + row.map(c => '<td>' + c + '</td>').join('') + '</tr>'
+                ).join('') + '</tbody>';
+                out.push('<table>' + thead + tbody + '</table>');
+            } else {
+                out.push(lines[i]);
+                i += 1;
+            }
+        }
+        return out.join('\n');
+    }
 
     /**
      * Convert basic markdown to HTML. The output is then run through
@@ -350,6 +402,12 @@ const Chat = (() => {
         html = html.replace(/\*\*(.+?)\*\*/g, '<strong>$1</strong>');
         // Italic
         html = html.replace(/\*(.+?)\*/g, '<em>$1</em>');
+        // GFM tables: a header row, a |---|---| delimiter, then body rows.
+        // Runs after inline formatting so bold/code inside cells is already
+        // converted, and before the list/paragraph passes so the table's
+        // internal newlines aren't turned into <br>. Each matched block is
+        // collapsed to a single-line <table>, leaving non-table lines intact.
+        html = _tablesToHTML(html);
         // Unordered lists (consecutive lines starting with - )
         html = html.replace(/(?:^|\n)((?:- .+\n?)+)/g, (_, block) => {
             const items = block.trim().split('\n').map(line =>
@@ -593,6 +651,9 @@ const Chat = (() => {
                     if (Array.isArray(data.options) && data.options.length) {
                         el = StructuredChoice.create(data);
                     }
+                    break;
+                case 'education.continue':
+                    el = ContinuePrompt.create(data);
                     break;
                 case 'phase.transition':
                     _appendPhaseTransition(data.from, data.to);

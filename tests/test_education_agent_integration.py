@@ -35,14 +35,22 @@ class TestEducationAgentToolRegistration:
             f"record_comprehension_answer not found in tools: {tool_names}"
         )
 
+    def test_present_continue_prompt_registered(self):
+        """present_continue_prompt must be in the education agent tools."""
+        tool_names = self._get_tool_names()
+        assert "present_continue_prompt" in tool_names, (
+            f"present_continue_prompt not found in tools: {tool_names}"
+        )
+
     def test_core_tools_present(self):
-        """All six expected tools are present — no accidental removals."""
+        """All seven expected tools are present — no accidental removals."""
         tool_names = self._get_tool_names()
         expected = {
             "get_user_profile",
             "get_education_progress",
             "present_comprehension_question",
             "record_comprehension_answer",
+            "present_continue_prompt",
             "advance_phase",
             "flag_safety_concern",
         }
@@ -52,8 +60,8 @@ class TestEducationAgentToolRegistration:
     def test_no_extra_unexpected_tools(self):
         """The tool count matches expected — no accidental additions."""
         tool_names = self._get_tool_names()
-        assert len(tool_names) == 6, (
-            f"Expected 6 tools, got {len(tool_names)}: {tool_names}"
+        assert len(tool_names) == 7, (
+            f"Expected 7 tools, got {len(tool_names)}: {tool_names}"
         )
 
 
@@ -98,6 +106,13 @@ class TestEducationPromptInstructions:
         prompt = self._get_prompt()
         assert "NEVER pass a score" in prompt or "only the selected_option" in prompt, (
             "prompt does not clarify score passthrough is forbidden"
+        )
+
+    def test_prompt_instructs_use_of_present_continue_prompt(self):
+        """The prompt must tell the agent to use present_continue_prompt for continuation."""
+        prompt = self._get_prompt()
+        assert "present_continue_prompt" in prompt, (
+            "prompt does not mention present_continue_prompt"
         )
 
 

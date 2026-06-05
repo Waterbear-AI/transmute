@@ -1189,6 +1189,42 @@ def present_comprehension_question(
     }
 
 
+def present_continue_prompt(
+    label: str = "Continue",
+    message: str = "continue",
+) -> dict[str, Any]:
+    """Render an interactive "Continue" button in the chat instead of asking the
+    user "are you ready to continue?" in text.
+
+    Call this whenever you would otherwise end a turn by asking the user whether
+    they're ready to move on — to the next category, the next dimension, or the
+    next section. The button renders inline in the chat; when the user clicks it,
+    the button disappears and ``message`` is delivered back to you as the user's
+    reply, at which point you continue normally. Do NOT also write the
+    "ready to continue?" question as markdown text — the button replaces it.
+
+    Args:
+        label: The button text shown to the user. Make it specific to what comes
+            next, e.g. "Continue to Category 2: Your Score". Defaults to
+            "Continue".
+        message: The text delivered back to you when the user clicks the button.
+            Keep it a short natural-language confirmation, e.g.
+            "Yes, continue to Category 2: Your Score". Defaults to "continue".
+
+    Returns:
+        dict with ``event_type`` = "education.continue", plus ``label`` and
+        ``message``. The frontend renders an interactive button from this payload
+        via the standard SSE event-emit mechanism. No database I/O is performed.
+    """
+    safe_label = (label or "Continue").strip() or "Continue"
+    safe_message = (message or "continue").strip() or "continue"
+    return {
+        "event_type": "education.continue",
+        "label": safe_label,
+        "message": safe_message,
+    }
+
+
 def record_comprehension_answer(
     user_id: str,
     dimension: str,
