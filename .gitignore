@@ -5,3 +5,4 @@ __pycache__/
 .mcp.json
 .pytest_cache/
 .compounds/
+.claude/
