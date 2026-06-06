@@ -598,7 +598,7 @@ class TestResetEndpoint:
         assert resp.status_code == 401
 
     def test_reset_rate_limit_returns_429(self):
-        """POST /reset returns 429 after exceeding 5 requests/hour."""
+        """POST /reset returns 429 after exceeding 20 requests/hour."""
         limiter.enabled = True
         limiter.reset()
         try:
@@ -611,7 +611,7 @@ class TestResetEndpoint:
             cookies = reg.cookies
 
             got_429 = False
-            for i in range(10):
+            for i in range(25):
                 resp = rate_client.post("/api/sessions/reset", cookies=cookies)
                 if resp.status_code == 429:
                     got_429 = True
@@ -910,3 +910,91 @@ class TestListSessionsEndpoint:
         data = resp.json()
         session_ids = [s["session_id"] for s in data["sessions"]]
         assert session_id not in session_ids
+
+
+class TestCreateSessionEndpoint:
+    """Integration tests for POST /api/sessions with archive_prior and title (BE-001)."""
+
+    def _register_user(self, email: str):
+        resp = client.post("/auth/register", json={
+            "name": "Create Session User",
+            "email": email,
+            "password": "password123",
+        })
+        assert resp.status_code == 200
+        return resp.json()["user_id"], resp.cookies
+
+    def test_create_session_with_title_returns_title_in_response(self):
+        """POST /api/sessions with title returns the title in the response."""
+        _, cookies = self._register_user("cs1@example.com")
+        resp = client.post(
+            "/api/sessions",
+            json={"title": "My First Tab"},
+            cookies=cookies,
+        )
+        assert resp.status_code == 200
+        data = resp.json()
+        assert data["title"] == "My First Tab", "title must be returned in the response"
+
+    def test_create_session_with_archive_prior_false_leaves_prior_active(self):
+        """POST /api/sessions with archive_prior=False keeps prior sessions active."""
+        _, cookies = self._register_user("cs2@example.com")
+
+        # Create first session (archive_prior defaults to False at API level)
+        first = client.post("/api/sessions", json={"archive_prior": False}, cookies=cookies)
+        assert first.status_code == 200
+        first_id = first.json()["session_id"]
+
+        # Create second session without archiving
+        second = client.post("/api/sessions", json={"archive_prior": False}, cookies=cookies)
+        assert second.status_code == 200
+
+        # Both sessions must appear in the active list
+        list_resp = client.get("/api/sessions", cookies=cookies)
+        assert list_resp.status_code == 200
+        session_ids = [s["session_id"] for s in list_resp.json()["sessions"]]
+        assert first_id in session_ids, "Prior session must remain active with archive_prior=False"
+
+    def test_create_session_with_archive_prior_true_archives_prior_sessions(self):
+        """POST /api/sessions with archive_prior=True archives all prior active sessions."""
+        _, cookies = self._register_user("cs3@example.com")
+
+        # Create first session without archiving
+        first = client.post("/api/sessions", json={"archive_prior": False}, cookies=cookies)
+        assert first.status_code == 200
+        first_id = first.json()["session_id"]
+
+        # Create second session with archive_prior=True
+        second = client.post("/api/sessions", json={"archive_prior": True}, cookies=cookies)
+        assert second.status_code == 200
+        second_id = second.json()["session_id"]
+
+        # Only the new session must appear in the active list
+        list_resp = client.get("/api/sessions", cookies=cookies)
+        assert list_resp.status_code == 200
+        session_ids = [s["session_id"] for s in list_resp.json()["sessions"]]
+        assert first_id not in session_ids, "Prior session must be archived with archive_prior=True"
+        assert second_id in session_ids, "New session must be active"
+
+    def test_create_session_without_title_stores_null_title(self):
+        """POST /api/sessions without a title stores NULL and returns null title."""
+        _, cookies = self._register_user("cs4@example.com")
+        resp = client.post("/api/sessions", json={}, cookies=cookies)
+        assert resp.status_code == 200
+        data = resp.json()
+        assert data["title"] is None, "title must be null when not provided"
+
+    def test_list_sessions_returns_title(self):
+        """GET /api/sessions returns the title field for each session."""
+        _, cookies = self._register_user("cs5@example.com")
+        client.post(
+            "/api/sessions",
+            json={"title": "Tab Alpha", "archive_prior": False},
+            cookies=cookies,
+        )
+        list_resp = client.get("/api/sessions", cookies=cookies)
+        assert list_resp.status_code == 200
+        sessions = list_resp.json()["sessions"]
+        assert len(sessions) >= 1
+        titles = [s["title"] for s in sessions]
+        assert "Tab Alpha" in titles, "Session title must appear in list response"

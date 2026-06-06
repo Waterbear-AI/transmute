@@ -133,25 +133,29 @@ class SqliteSessionService(BaseSessionService):
         user_id: str,
         state: Optional[dict[str, Any]] = None,
         session_id: Optional[str] = None,
+        archive_prior: bool = True,
+        title: Optional[str] = None,
     ) -> Session:
         sid = session_id or str(uuid.uuid4())
 
         with get_db_session() as conn:
-            # Archive prior sessions for this user
-            conn.execute(
-                "UPDATE adk_sessions SET archived = TRUE WHERE user_id = ? AND archived = FALSE",
-                (user_id,),
-            )
+            if archive_prior:
+                # Archive all prior active sessions for this user before creating a new one.
+                conn.execute(
+                    "UPDATE adk_sessions SET archived = TRUE WHERE user_id = ? AND archived = FALSE",
+                    (user_id,),
+                )
 
             conn.execute(
                 """INSERT INTO adk_sessions
-                   (session_id, user_id, app_name, session_state, created_at, updated_at)
-                   VALUES (?, ?, ?, ?, ?, ?)""",
+                   (session_id, user_id, app_name, session_state, title, created_at, updated_at)
+                   VALUES (?, ?, ?, ?, ?, ?, ?)""",
                 (
                     sid,
                     user_id,
                     app_name,
                     json.dumps(state or {}),
+                    title,
                     datetime.utcnow().isoformat(),
                     datetime.utcnow().isoformat(),
                 ),

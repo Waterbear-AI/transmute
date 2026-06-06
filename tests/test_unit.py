@@ -339,6 +339,174 @@ class TestSessionTitleMigration:
             os.unlink(db_path)
 
 
+# --- SqliteSessionService.create_session Unit Tests (BE-001) ---
+
+class TestCreateSessionService:
+    """Unit tests for SqliteSessionService.create_session's new behavior."""
+
+    def _run(self, coro):
+        import asyncio
+        return asyncio.run(coro)
+
+    def _make_db(self):
+        """Return a temp DB path with all migrations applied."""
+        f = tempfile.NamedTemporaryFile(suffix=".db", delete=False)
+        f.close()
+        run_migrations(db_path=f.name)
+        return f.name
+
+    def _get_sessions(self, db_path: str, user_id: str) -> list:
+        import sqlite3
+        conn = sqlite3.connect(db_path)
+        conn.row_factory = sqlite3.Row
+        rows = conn.execute(
+            "SELECT * FROM adk_sessions WHERE user_id = ? ORDER BY created_at",
+            (user_id,),
+        ).fetchall()
+        conn.close()
+        return [dict(r) for r in rows]
+
+    def _insert_user(self, db_path: str, user_id: str) -> None:
+        import sqlite3
+        conn = sqlite3.connect(db_path)
+        conn.execute(
+            "INSERT INTO users (id, name, email, password_hash) VALUES (?, ?, ?, ?)",
+            (user_id, "Test User", f"{user_id}@test.example.com", "hash"),
+        )
+        conn.commit()
+        conn.close()
+
+    def test_title_is_persisted(self):
+        """create_session with title stores the title in adk_sessions."""
+        import os
+        import uuid
+        from unittest.mock import patch
+
+        db_path = self._make_db()
+        try:
+            uid = str(uuid.uuid4())
+            self._insert_user(db_path, uid)
+
+            with patch.dict(os.environ, {"DB_PATH": db_path}):
+                from config import _settings
+                import config
+                config._settings = None
+                try:
+                    from agents.transmutation.session_service import SqliteSessionService
+                    svc = SqliteSessionService()
+                    session = self._run(svc.create_session(
+                        app_name="test",
+                        user_id=uid,
+                        title="My Tab",
+                    ))
+                finally:
+                    config._settings = None
+
+            rows = self._get_sessions(db_path, uid)
+            assert len(rows) == 1
+            assert rows[0]["title"] == "My Tab", "title must be persisted in adk_sessions"
+        finally:
+            os.unlink(db_path)
+
+    def test_archive_prior_false_leaves_prior_sessions_active(self):
+        """create_session with archive_prior=False does not archive prior sessions."""
+        import os
+        import uuid
+        from unittest.mock import patch
+
+        db_path = self._make_db()
+        try:
+            uid = str(uuid.uuid4())
+            self._insert_user(db_path, uid)
+
+            with patch.dict(os.environ, {"DB_PATH": db_path}):
+                import config
+                config._settings = None
+                try:
+                    from agents.transmutation.session_service import SqliteSessionService
+                    svc = SqliteSessionService()
+                    # Create first session (archive_prior=True archives nothing yet)
+                    self._run(svc.create_session(
+                        app_name="test", user_id=uid, archive_prior=True
+                    ))
+                    # Create second session with archive_prior=False — prior must stay active
+                    self._run(svc.create_session(
+                        app_name="test", user_id=uid, archive_prior=False
+                    ))
+                finally:
+                    config._settings = None
+
+            rows = self._get_sessions(db_path, uid)
+            assert len(rows) == 2
+            active = [r for r in rows if not r["archived"]]
+            assert len(active) == 2, "Both sessions must remain active when archive_prior=False"
+        finally:
+            os.unlink(db_path)
+
+    def test_archive_prior_true_archives_prior_sessions(self):
+        """create_session with archive_prior=True archives all prior active sessions."""
+        import os
+        import uuid
+        from unittest.mock import patch
+
+        db_path = self._make_db()
+        try:
+            uid = str(uuid.uuid4())
+            self._insert_user(db_path, uid)
+
+            with patch.dict(os.environ, {"DB_PATH": db_path}):
+                import config
+                config._settings = None
+                try:
+                    from agents.transmutation.session_service import SqliteSessionService
+                    svc = SqliteSessionService()
+                    first = self._run(svc.create_session(
+                        app_name="test", user_id=uid, archive_prior=False
+                    ))
+                    self._run(svc.create_session(
+                        app_name="test", user_id=uid, archive_prior=True
+                    ))
+                finally:
+                    config._settings = None
+
+            rows = self._get_sessions(db_path, uid)
+            assert len(rows) == 2
+            # First session must now be archived
+            first_row = next(r for r in rows if r["session_id"] == first.id)
+            assert first_row["archived"], "Prior session must be archived when archive_prior=True"
+            # Second session must be active
+            active = [r for r in rows if not r["archived"]]
+            assert len(active) == 1, "Only the new session must remain active"
+        finally:
+            os.unlink(db_path)
+
+    def test_null_title_stored_when_not_provided(self):
+        """create_session without title stores NULL for the title column."""
+        import os
+        import uuid
+        from unittest.mock import patch
+
+        db_path = self._make_db()
+        try:
+            uid = str(uuid.uuid4())
+            self._insert_user(db_path, uid)
+
+            with patch.dict(os.environ, {"DB_PATH": db_path}):
+                import config
+                config._settings = None
+                try:
+                    from agents.transmutation.session_service import SqliteSessionService
+                    svc = SqliteSessionService()
+                    self._run(svc.create_session(app_name="test", user_id=uid))
+                finally:
+                    config._settings = None
+
+            rows = self._get_sessions(db_path, uid)
+            assert rows[0]["title"] is None, "title must be NULL when not provided"
+        finally:
+            os.unlink(db_path)
+
+
 # --- User ID Injection Tests (BE-006) ---
 
 class TestWithUserId:

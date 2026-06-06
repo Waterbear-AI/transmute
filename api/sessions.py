@@ -24,6 +24,15 @@ APP_NAME = "transmutation"
 
 class CreateSessionRequest(BaseModel):
     app_name: str = Field(default=APP_NAME)
+    archive_prior: bool = Field(
+        default=False,
+        description="Archive all prior active sessions before creating the new one.",
+    )
+    title: Optional[str] = Field(
+        default=None,
+        max_length=200,
+        description="Optional user-chosen label for this session tab.",
+    )
 
 
 class SessionResponse(BaseModel):
@@ -33,6 +42,7 @@ class SessionResponse(BaseModel):
     archived: bool = False
     created_at: Optional[str] = None
     message_count: int = 0
+    title: Optional[str] = None
 
 
 class SessionListResponse(BaseModel):
@@ -127,17 +137,26 @@ async def create_session(
     body: CreateSessionRequest = CreateSessionRequest(),
     user_id: str = Depends(get_current_user_id),
 ):
-    """Create a new session, archiving any prior active sessions."""
+    """Create a new session, optionally archiving prior active sessions."""
+    # Strip and sanitize title: remove leading/trailing whitespace; treat blank as None.
+    raw_title = body.title
+    sanitized_title = raw_title.strip() if raw_title else None
+    if not sanitized_title:
+        sanitized_title = None
+
     session = await _session_service.create_session(
         app_name=body.app_name,
         user_id=user_id,
         state={"user_id": user_id},
+        archive_prior=body.archive_prior,
+        title=sanitized_title,
     )
     return SessionResponse(
         session_id=session.id,
         user_id=session.user_id,
         app_name=body.app_name,
         created_at=datetime.utcnow().isoformat(),
+        title=sanitized_title,
     )
 
 
@@ -148,7 +167,7 @@ async def list_sessions(
     """List all non-archived sessions for the current user with metadata."""
     with get_db_session() as conn:
         rows = conn.execute(
-            """SELECT session_id, user_id, app_name, archived, created_at, events_json
+            """SELECT session_id, user_id, app_name, archived, created_at, events_json, title
                FROM adk_sessions
                WHERE user_id = ? AND archived = FALSE
                ORDER BY created_at DESC""",
@@ -174,6 +193,7 @@ async def list_sessions(
             archived=bool(row["archived"]),
             created_at=row["created_at"],
             message_count=msg_count,
+            title=row["title"],
         ))
 
     # Lifetime accumulated cost across all the user's sessions (best-effort).
@@ -284,7 +304,7 @@ async def get_session_history(
 
 
 @router.post("/reset", response_model=SessionResponse)
-@limiter.limit("5/hour")
+@limiter.limit("20/hour")
 async def reset_session(
     request: Request,
     user_id: str = Depends(get_current_user_id),

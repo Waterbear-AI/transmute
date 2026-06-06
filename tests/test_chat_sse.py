@@ -61,10 +61,10 @@ class TestSessionAPI:
         assert resp.status_code == 401
 
     def test_create_session_archives_previous(self, authenticated_client):
-        # Create two sessions
-        resp1 = authenticated_client.post("/api/sessions")
+        # Create two sessions, the second with archive_prior=True to archive the first.
+        resp1 = authenticated_client.post("/api/sessions", json={"archive_prior": False})
         session1_id = resp1.json()["session_id"]
-        resp2 = authenticated_client.post("/api/sessions")
+        resp2 = authenticated_client.post("/api/sessions", json={"archive_prior": True})
         session2_id = resp2.json()["session_id"]
 
         # List should only show the latest (non-archived)
