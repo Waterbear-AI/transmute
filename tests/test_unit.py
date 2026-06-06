@@ -507,6 +507,177 @@ class TestCreateSessionService:
             os.unlink(db_path)
 
 
+# --- SqliteSessionService.rename_session and RenameSessionRequest Unit Tests (BE-002) ---
+
+class TestRenameSessionService:
+    """Unit tests for SqliteSessionService.rename_session."""
+
+    def _make_db(self):
+        f = tempfile.NamedTemporaryFile(suffix=".db", delete=False)
+        f.close()
+        run_migrations(db_path=f.name)
+        return f.name
+
+    def _insert_user(self, db_path: str, user_id: str) -> None:
+        import sqlite3
+        conn = sqlite3.connect(db_path)
+        conn.execute(
+            "INSERT INTO users (id, name, email, password_hash) VALUES (?, ?, ?, ?)",
+            (user_id, "Test", f"{user_id}@test.example.com", "hash"),
+        )
+        conn.commit()
+        conn.close()
+
+    def _insert_session(self, db_path: str, user_id: str, session_id: str) -> None:
+        import sqlite3
+        conn = sqlite3.connect(db_path)
+        conn.execute(
+            "INSERT INTO adk_sessions (session_id, user_id, app_name, created_at) "
+            "VALUES (?, ?, 'test', datetime('now'))",
+            (session_id, user_id),
+        )
+        conn.commit()
+        conn.close()
+
+    def _get_title(self, db_path: str, session_id: str) -> str | None:
+        import sqlite3
+        conn = sqlite3.connect(db_path)
+        row = conn.execute(
+            "SELECT title FROM adk_sessions WHERE session_id = ?", (session_id,)
+        ).fetchone()
+        conn.close()
+        return row[0] if row else None
+
+    def test_rename_session_updates_title_and_returns_true(self):
+        """rename_session returns True and updates title for an owned session."""
+        import os
+        import uuid
+        from unittest.mock import patch
+
+        db_path = self._make_db()
+        try:
+            uid = str(uuid.uuid4())
+            sid = str(uuid.uuid4())
+            self._insert_user(db_path, uid)
+            self._insert_session(db_path, uid, sid)
+
+            with patch.dict(os.environ, {"DB_PATH": db_path}):
+                import config
+                config._settings = None
+                try:
+                    from agents.transmutation.session_service import SqliteSessionService
+                    svc = SqliteSessionService()
+                    result = svc.rename_session(user_id=uid, session_id=sid, title="New Name")
+                finally:
+                    config._settings = None
+
+            assert result is True, "rename_session must return True on success"
+            assert self._get_title(db_path, sid) == "New Name"
+        finally:
+            os.unlink(db_path)
+
+    def test_rename_session_returns_false_for_wrong_user(self):
+        """rename_session returns False when the session is not owned by the user."""
+        import os
+        import uuid
+        from unittest.mock import patch
+
+        db_path = self._make_db()
+        try:
+            uid = str(uuid.uuid4())
+            other_uid = str(uuid.uuid4())
+            sid = str(uuid.uuid4())
+            self._insert_user(db_path, uid)
+            self._insert_user(db_path, other_uid)
+            self._insert_session(db_path, uid, sid)
+
+            with patch.dict(os.environ, {"DB_PATH": db_path}):
+                import config
+                config._settings = None
+                try:
+                    from agents.transmutation.session_service import SqliteSessionService
+                    svc = SqliteSessionService()
+                    # other_uid tries to rename uid's session
+                    result = svc.rename_session(
+                        user_id=other_uid, session_id=sid, title="Hacked"
+                    )
+                finally:
+                    config._settings = None
+
+            assert result is False, "rename_session must return False for non-owner"
+            assert self._get_title(db_path, sid) is None, "title must not be changed"
+        finally:
+            os.unlink(db_path)
+
+    def test_rename_session_returns_false_for_nonexistent_session(self):
+        """rename_session returns False when the session_id does not exist."""
+        import os
+        import uuid
+        from unittest.mock import patch
+
+        db_path = self._make_db()
+        try:
+            uid = str(uuid.uuid4())
+            self._insert_user(db_path, uid)
+
+            with patch.dict(os.environ, {"DB_PATH": db_path}):
+                import config
+                config._settings = None
+                try:
+                    from agents.transmutation.session_service import SqliteSessionService
+                    svc = SqliteSessionService()
+                    result = svc.rename_session(
+                        user_id=uid, session_id="nonexistent-id", title="Ghost"
+                    )
+                finally:
+                    config._settings = None
+
+            assert result is False
+        finally:
+            os.unlink(db_path)
+
+
+class TestRenameSessionRequest:
+    """Unit tests for RenameSessionRequest Pydantic validation."""
+
+    def test_valid_title_is_accepted(self):
+        from api.sessions import RenameSessionRequest
+        req = RenameSessionRequest(title="My Session")
+        assert req.title == "My Session"
+
+    def test_title_is_stripped(self):
+        from api.sessions import RenameSessionRequest
+        req = RenameSessionRequest(title="  My Session  ")
+        assert req.title == "My Session"
+
+    def test_title_of_exactly_80_chars_is_valid(self):
+        from api.sessions import RenameSessionRequest
+        title = "a" * 80
+        req = RenameSessionRequest(title=title)
+        assert len(req.title) == 80
+
+    def test_empty_title_raises_validation_error(self):
+        from api.sessions import RenameSessionRequest
+        import pytest
+        from pydantic import ValidationError
+        with pytest.raises(ValidationError):
+            RenameSessionRequest(title="")
+
+    def test_whitespace_only_title_raises_validation_error(self):
+        from api.sessions import RenameSessionRequest
+        import pytest
+        from pydantic import ValidationError
+        with pytest.raises(ValidationError):
+            RenameSessionRequest(title="   ")
+
+    def test_title_exceeding_80_chars_raises_validation_error(self):
+        from api.sessions import RenameSessionRequest
+        import pytest
+        from pydantic import ValidationError
+        with pytest.raises(ValidationError):
+            RenameSessionRequest(title="a" * 81)
+
+
 # --- User ID Injection Tests (BE-006) ---
 
 class TestWithUserId:

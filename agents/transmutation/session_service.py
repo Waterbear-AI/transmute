@@ -243,6 +243,25 @@ class SqliteSessionService(BaseSessionService):
                 (session_id, user_id),
             )
 
+    def rename_session(
+        self, *, user_id: str, session_id: str, title: str
+    ) -> bool:
+        """Update the title for a session owned by user_id.
+
+        Uses a single conditional UPDATE to atomically verify ownership and
+        apply the change — no read-then-write race (backend-business-logic R2).
+        Returns True if the row was updated, False if it was not found or not
+        owned by user_id.
+        """
+        with get_db_session() as conn:
+            cursor = conn.execute(
+                """UPDATE adk_sessions
+                   SET title = ?, updated_at = ?
+                   WHERE session_id = ? AND user_id = ?""",
+                (title, datetime.utcnow().isoformat(), session_id, user_id),
+            )
+        return cursor.rowcount > 0
+
     async def append_event(
         self, session: Session, event: Event
     ) -> Event:

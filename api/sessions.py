@@ -4,7 +4,7 @@ from datetime import datetime
 from typing import Any, Optional
 
 from fastapi import APIRouter, Depends, HTTPException, Request
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, field_validator
 
 from api.auth import get_current_user_id
 from agents.transmutation.session_service import SqliteSessionService
@@ -49,6 +49,20 @@ class SessionListResponse(BaseModel):
     sessions: list[SessionResponse]
     count: int
     user_total_cost_usd: float = 0.0  # lifetime accumulated LLM cost across all sessions
+
+
+class RenameSessionRequest(BaseModel):
+    title: str = Field(description="New title for the session tab (1-80 characters).")
+
+    @field_validator("title")
+    @classmethod
+    def validate_title(cls, value: str) -> str:
+        stripped = value.strip()
+        if len(stripped) < 1:
+            raise ValueError("title must be at least 1 character after trimming whitespace")
+        if len(stripped) > 80:
+            raise ValueError("title must not exceed 80 characters after trimming whitespace")
+        return stripped
 
 
 # --- History endpoint models ---
@@ -157,6 +171,45 @@ async def create_session(
         app_name=body.app_name,
         created_at=datetime.utcnow().isoformat(),
         title=sanitized_title,
+    )
+
+
+@router.patch("/{session_id}", response_model=SessionResponse)
+async def rename_session(
+    session_id: str,
+    body: RenameSessionRequest,
+    user_id: str = Depends(get_current_user_id),
+):
+    """Rename a session tab owned by the current user.
+
+    Returns 404 if the session does not exist or is not owned by the caller —
+    this prevents enumeration of session IDs belonging to other users.
+    """
+    updated = _session_service.rename_session(
+        user_id=user_id,
+        session_id=session_id,
+        title=body.title,
+    )
+    if not updated:
+        raise HTTPException(status_code=404, detail="Session not found")
+
+    with get_db_session() as conn:
+        row = conn.execute(
+            """SELECT session_id, user_id, app_name, archived, created_at, title
+               FROM adk_sessions WHERE session_id = ? AND user_id = ?""",
+            (session_id, user_id),
+        ).fetchone()
+
+    if not row:
+        raise HTTPException(status_code=404, detail="Session not found")
+
+    return SessionResponse(
+        session_id=row["session_id"],
+        user_id=row["user_id"],
+        app_name=row["app_name"] or APP_NAME,
+        archived=bool(row["archived"]),
+        created_at=row["created_at"],
+        title=row["title"],
     )
 
 

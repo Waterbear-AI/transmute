@@ -998,3 +998,108 @@ class TestCreateSessionEndpoint:
         assert len(sessions) >= 1
         titles = [s["title"] for s in sessions]
         assert "Tab Alpha" in titles, "Session title must appear in list response"
+
+
+class TestRenameSessionEndpoint:
+    """Integration tests for PATCH /api/sessions/{session_id} (BE-002)."""
+
+    def _register_and_create_session(self, email: str):
+        """Register a user, create a session, return (user_id, session_id, cookies)."""
+        resp = client.post("/auth/register", json={
+            "name": "Rename User",
+            "email": email,
+            "password": "password123",
+        })
+        assert resp.status_code == 200
+        user_id = resp.json()["user_id"]
+        cookies = resp.cookies
+
+        sess = client.post("/api/sessions", json={"archive_prior": False}, cookies=cookies)
+        assert sess.status_code == 200
+        return user_id, sess.json()["session_id"], cookies
+
+    def test_rename_session_returns_updated_title(self):
+        """PATCH /api/sessions/{id} returns a SessionResponse with the new title."""
+        _, session_id, cookies = self._register_and_create_session("rn1@example.com")
+        resp = client.patch(
+            f"/api/sessions/{session_id}",
+            json={"title": "Renamed Tab"},
+            cookies=cookies,
+        )
+        assert resp.status_code == 200
+        data = resp.json()
+        assert data["title"] == "Renamed Tab"
+        assert data["session_id"] == session_id
+
+    def test_rename_session_reflected_in_list(self):
+        """After renaming, GET /api/sessions returns the updated title."""
+        _, session_id, cookies = self._register_and_create_session("rn2@example.com")
+        client.patch(
+            f"/api/sessions/{session_id}",
+            json={"title": "List Tab"},
+            cookies=cookies,
+        )
+        list_resp = client.get("/api/sessions", cookies=cookies)
+        assert list_resp.status_code == 200
+        sessions = list_resp.json()["sessions"]
+        titles = {s["session_id"]: s["title"] for s in sessions}
+        assert titles.get(session_id) == "List Tab"
+
+    def test_rename_session_with_empty_title_returns_422(self):
+        """PATCH with an empty title returns 422 Unprocessable Entity."""
+        _, session_id, cookies = self._register_and_create_session("rn3@example.com")
+        resp = client.patch(
+            f"/api/sessions/{session_id}",
+            json={"title": ""},
+            cookies=cookies,
+        )
+        assert resp.status_code == 422
+
+    def test_rename_session_with_too_long_title_returns_422(self):
+        """PATCH with a title exceeding 80 chars returns 422."""
+        _, session_id, cookies = self._register_and_create_session("rn4@example.com")
+        resp = client.patch(
+            f"/api/sessions/{session_id}",
+            json={"title": "a" * 81},
+            cookies=cookies,
+        )
+        assert resp.status_code == 422
+
+    def test_rename_nonexistent_session_returns_404(self):
+        """PATCH on a non-existent session_id returns 404."""
+        _, _, cookies = self._register_and_create_session("rn5@example.com")
+        resp = client.patch(
+            "/api/sessions/does-not-exist",
+            json={"title": "Ghost"},
+            cookies=cookies,
+        )
+        assert resp.status_code == 404
+
+    def test_rename_another_users_session_returns_404(self):
+        """Renaming a session owned by another user returns 404 (BOLA protection)."""
+        _, session_id, _ = self._register_and_create_session("rn6@example.com")
+
+        # Register a second user
+        resp2 = client.post("/auth/register", json={
+            "name": "Other User",
+            "email": "rn6b@example.com",
+            "password": "password123",
+        })
+        assert resp2.status_code == 200
+        other_cookies = resp2.cookies
+
+        resp = client.patch(
+            f"/api/sessions/{session_id}",
+            json={"title": "Hacked"},
+            cookies=other_cookies,
+        )
+        assert resp.status_code == 404
+
+    def test_rename_session_without_auth_returns_401(self):
+        """PATCH without authentication returns 401."""
+        fresh_client = TestClient(app)
+        resp = fresh_client.patch(
+            "/api/sessions/some-session-id",
+            json={"title": "Unauthorized"},
+        )
+        assert resp.status_code == 401
