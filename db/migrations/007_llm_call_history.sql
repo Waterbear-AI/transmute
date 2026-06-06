@@ -3,7 +3,7 @@
 
 -- UP migration
 CREATE TABLE llm_calls (
-    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    id INTEGER PRIMARY KEY,
     session_id TEXT REFERENCES adk_sessions(session_id) ON DELETE CASCADE,
     user_id TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
     author TEXT,

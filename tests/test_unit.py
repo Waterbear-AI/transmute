@@ -105,8 +105,10 @@ class TestMigrationRunner:
             db_path = f.name
         try:
             count = run_migrations(db_path=db_path)
-            # 001_initial, 002_flow_tracking, 003_session_events, 004_sentinel_tracking, 005_practice_linkage
-            assert count == 5
+            # One applied migration per .sql file in db/migrations/ — kept dynamic
+            # so adding a migration does not break this test.
+            from db.database import _get_migration_files
+            assert count == len(_get_migration_files())
 
             import sqlite3
             conn = sqlite3.connect(db_path)
@@ -129,7 +131,8 @@ class TestMigrationRunner:
             assert "moral_ledger" in tables
             assert "events_json" in cols
             assert "dimension_assessment_state" in tables
-            assert len(tables) == 14  # includes roadmap_practices from migration 005
+            assert "llm_calls" in tables  # from migration 007
+            assert len(tables) == 15  # +llm_calls (007); roadmap_practices (005)
         finally:
             os.unlink(db_path)
 
@@ -184,7 +187,8 @@ class TestMigrationRunner:
         try:
             # Apply only migrations 001 and 002 first
             count = run_migrations(db_path=db_path)
-            assert count == 5  # All five applied fresh
+            from db.database import _get_migration_files
+            assert count == len(_get_migration_files())  # all migrations applied fresh
 
             # Simulate a DB that only has versions 1 and 2 by removing version 3
             conn = _sqlite3.connect(db_path)

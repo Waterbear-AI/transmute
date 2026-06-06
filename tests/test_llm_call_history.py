@@ -349,7 +349,7 @@ def _run_stream(user_id, session_id, events, phase="orientation"):
     with patch("api.chat._runner") as mock_runner, \
          patch("api.chat._get_user_phase", return_value=phase):
         mock_runner.run_async.return_value = _mock_runner_gen(events)
-        return asyncio.get_event_loop().run_until_complete(_collect())
+        return asyncio.run(_collect())
 
 
 class TestStreamRecordingIntegration:
@@ -407,7 +407,7 @@ class TestStreamRecordingIntegration:
              patch.object(SqliteSessionService, "record_llm_call",
                          side_effect=RuntimeError("simulated DB failure")):
             mock_runner.run_async.return_value = _mock_runner_gen(events)
-            raw = asyncio.get_event_loop().run_until_complete(_collect())
+            raw = asyncio.run(_collect())
 
         # Stream completed — session.cost event must be present
         assert "session.cost" in raw
