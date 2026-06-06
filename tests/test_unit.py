@@ -132,7 +132,8 @@ class TestMigrationRunner:
             assert "events_json" in cols
             assert "dimension_assessment_state" in tables
             assert "llm_calls" in tables  # from migration 007
-            assert len(tables) == 15  # +llm_calls (007); roadmap_practices (005)
+            assert "title" in cols  # from migration 008
+            assert len(tables) == 15  # +llm_calls (007); roadmap_practices (005); 008 adds column only
         finally:
             os.unlink(db_path)
 
@@ -205,6 +206,135 @@ class TestMigrationRunner:
             cols = [r[1] for r in conn.execute("PRAGMA table_info(adk_sessions)").fetchall()]
             conn.close()
             assert "events_json" in cols
+        finally:
+            os.unlink(db_path)
+
+
+# --- Session Title Migration Tests (DB-001) ---
+
+class TestSessionTitleMigration:
+    """Verify migration 008 adds the nullable 'title' column to adk_sessions."""
+
+    def test_title_column_exists(self):
+        """The title column must exist in adk_sessions after migration."""
+        import sqlite3 as _sqlite3
+
+        with tempfile.NamedTemporaryFile(suffix=".db", delete=False) as f:
+            db_path = f.name
+        try:
+            run_migrations(db_path=db_path)
+            conn = _sqlite3.connect(db_path)
+            col_names = [
+                r[1] for r in conn.execute("PRAGMA table_info(adk_sessions)").fetchall()
+            ]
+            conn.close()
+            assert "title" in col_names, "title column must exist in adk_sessions"
+        finally:
+            os.unlink(db_path)
+
+    def test_title_column_is_text_and_nullable(self):
+        """The title column must be of type TEXT and allow NULL values."""
+        import sqlite3 as _sqlite3
+
+        with tempfile.NamedTemporaryFile(suffix=".db", delete=False) as f:
+            db_path = f.name
+        try:
+            run_migrations(db_path=db_path)
+            conn = _sqlite3.connect(db_path)
+            cols = {
+                r[1]: {"type": r[2], "notnull": r[3], "dflt_value": r[4]}
+                for r in conn.execute("PRAGMA table_info(adk_sessions)").fetchall()
+            }
+            conn.close()
+            assert "title" in cols, "title column must exist"
+            assert cols["title"]["type"] == "TEXT", "title column type must be TEXT"
+            assert cols["title"]["notnull"] == 0, "title column must be nullable"
+            assert cols["title"]["dflt_value"] is None, "title column default must be NULL"
+        finally:
+            os.unlink(db_path)
+
+    def test_title_accepts_null(self):
+        """Inserting a row without a title stores NULL for that column."""
+        import sqlite3 as _sqlite3
+        import uuid
+
+        with tempfile.NamedTemporaryFile(suffix=".db", delete=False) as f:
+            db_path = f.name
+        try:
+            run_migrations(db_path=db_path)
+            conn = _sqlite3.connect(db_path)
+            conn.row_factory = _sqlite3.Row
+            conn.execute("PRAGMA foreign_keys=ON")
+            uid = str(uuid.uuid4())
+            conn.execute(
+                "INSERT INTO users (id, name, email, password_hash) VALUES (?, ?, ?, ?)",
+                (uid, "Test", f"{uid}@test.example.com", "hash"),
+            )
+            sid = str(uuid.uuid4())
+            conn.execute(
+                "INSERT INTO adk_sessions (session_id, user_id, app_name, created_at) "
+                "VALUES (?, ?, 'test', datetime('now'))",
+                (sid, uid),
+            )
+            conn.commit()
+            row = conn.execute(
+                "SELECT title FROM adk_sessions WHERE session_id=?", (sid,)
+            ).fetchone()
+            conn.close()
+            assert row["title"] is None, "title must default to NULL"
+        finally:
+            os.unlink(db_path)
+
+    def test_title_accepts_string_value(self):
+        """Inserting a session with an explicit title stores the value correctly."""
+        import sqlite3 as _sqlite3
+        import uuid
+
+        with tempfile.NamedTemporaryFile(suffix=".db", delete=False) as f:
+            db_path = f.name
+        try:
+            run_migrations(db_path=db_path)
+            conn = _sqlite3.connect(db_path)
+            conn.row_factory = _sqlite3.Row
+            conn.execute("PRAGMA foreign_keys=ON")
+            uid = str(uuid.uuid4())
+            conn.execute(
+                "INSERT INTO users (id, name, email, password_hash) VALUES (?, ?, ?, ?)",
+                (uid, "Test", f"{uid}@test.example.com", "hash"),
+            )
+            sid = str(uuid.uuid4())
+            conn.execute(
+                "INSERT INTO adk_sessions (session_id, user_id, app_name, created_at, title) "
+                "VALUES (?, ?, 'test', datetime('now'), ?)",
+                (sid, uid, "My Session"),
+            )
+            conn.commit()
+            row = conn.execute(
+                "SELECT title FROM adk_sessions WHERE session_id=?", (sid,)
+            ).fetchone()
+            conn.close()
+            assert row["title"] == "My Session", "title must store the provided string value"
+        finally:
+            os.unlink(db_path)
+
+    def test_migration_idempotent(self):
+        """Running migrations twice on the same DB applies 008 only once."""
+        import sqlite3 as _sqlite3
+
+        with tempfile.NamedTemporaryFile(suffix=".db", delete=False) as f:
+            db_path = f.name
+        try:
+            run_migrations(db_path=db_path)
+            # Second run must apply zero migrations (idempotent)
+            count2 = run_migrations(db_path=db_path)
+            assert count2 == 0, "Re-running migrations must apply nothing"
+            # Column must still be present
+            conn = _sqlite3.connect(db_path)
+            col_names = [
+                r[1] for r in conn.execute("PRAGMA table_info(adk_sessions)").fetchall()
+            ]
+            conn.close()
+            assert "title" in col_names
         finally:
             os.unlink(db_path)
 
