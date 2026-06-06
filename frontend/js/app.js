@@ -112,6 +112,7 @@ const App = (() => {
 
     async function init() {
         Toast.init();
+        Usage.init();
         _initOfflineDetection();
         Auth.setAuthChangeCallback(handleAuthChange);
         const user = await Auth.checkSession();

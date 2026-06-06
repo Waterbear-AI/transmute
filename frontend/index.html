@@ -20,7 +20,7 @@
         <header class="top-bar">
             <div class="top-bar__title">Transmutation Engine</div>
             <div class="top-bar__right">
-                <span id="cost-display" class="top-bar__cost"></span>
+                <button type="button" id="cost-display" class="top-bar__cost top-bar__cost--btn" aria-haspopup="dialog"></button>
                 <span id="user-name" class="top-bar__user"></span>
                 <button id="logout-btn" class="top-bar__logout" type="button">Logout</button>
             </div>
@@ -53,6 +53,45 @@
             </section>
         </main>
 
+        <!-- LLM call history dialog -->
+        <div id="cost-dialog-backdrop" class="cost-dialog-backdrop" hidden aria-hidden="true"></div>
+        <div id="cost-dialog"
+             class="cost-dialog"
+             role="dialog"
+             aria-modal="true"
+             aria-labelledby="cost-dialog-title"
+             hidden>
+            <div class="cost-dialog__header">
+                <h2 id="cost-dialog-title" class="cost-dialog__title">LLM Call History</h2>
+                <button type="button" id="cost-dialog-close" class="cost-dialog__close" aria-label="Close dialog">×</button>
+            </div>
+            <p id="cost-dialog-subtitle" class="cost-dialog__subtitle"></p>
+            <div class="cost-dialog__body">
+                <div id="cost-dialog-loading" class="cost-dialog__loading" hidden aria-busy="true">
+                    <span class="cost-dialog__spinner" role="status" aria-label="Loading call history"></span>
+                </div>
+                <p id="cost-dialog-empty" class="cost-dialog__empty" hidden>No LLM calls yet.</p>
+                <p id="cost-dialog-error" class="cost-dialog__error" role="alert" hidden></p>
+                <div class="cost-dialog__table-wrap">
+                    <table id="cost-dialog-table" class="cost-dialog__table" aria-label="LLM call history">
+                        <thead>
+                            <tr>
+                                <th scope="col">When</th>
+                                <th scope="col">What it was for</th>
+                                <th scope="col" class="cost-dialog__num">In</th>
+                                <th scope="col" class="cost-dialog__num">Out</th>
+                                <th scope="col" class="cost-dialog__num">Cost</th>
+                            </tr>
+                        </thead>
+                        <tbody id="cost-dialog-tbody"></tbody>
+                    </table>
+                </div>
+                <div class="cost-dialog__footer">
+                    <button type="button" id="cost-dialog-load-more" class="cost-dialog__load-more" hidden>Load more</button>
+                </div>
+            </div>
+        </div>
+
         <!-- Bottom bar: Sessions -->
         <footer class="bottom-bar" id="bottom-bar">
             <div class="session-list" id="session-list"></div>
@@ -71,6 +110,7 @@
     <script src="/js/components/continue-prompt.js"></script>
     <script src="/js/components/toast.js"></script>
     <script src="/js/chat.js"></script>
+    <script src="/js/usage.js"></script>
     <script src="/js/app.js"></script>
 </body>
 </html>
