@@ -545,6 +545,88 @@ body {
     color: white;
 }
 
+/* ── Session Tab Strip ──────────────────────── */
+
+#session-tabs {
+    display: flex;
+    align-items: center;
+    gap: 4px;
+    padding: 6px 12px 0;
+    overflow-x: auto;
+    border-top: 1px solid var(--color-border);
+    background: var(--color-surface);
+    /* Scrollbar styling — thin on supporting browsers */
+    scrollbar-width: thin;
+    scrollbar-color: var(--color-border) transparent;
+}
+
+.session-tab {
+    background: var(--color-bg);
+    border: 1px solid var(--color-border);
+    color: var(--color-text-muted);
+    padding: 4px 12px;
+    border-radius: 4px 4px 0 0;
+    cursor: pointer;
+    font-size: 12px;
+    white-space: nowrap;
+    max-width: 160px;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    transition: color 0.15s, border-color 0.15s, background 0.15s;
+    flex-shrink: 0;
+    /* Ensure visible focus ring for keyboard users */
+    outline-offset: 2px;
+}
+
+.session-tab:hover {
+    color: var(--color-text);
+    border-color: var(--color-text-muted);
+}
+
+.session-tab:focus-visible {
+    outline: 2px solid var(--color-accent);
+}
+
+.session-tab--active {
+    border-color: var(--color-accent);
+    border-bottom-color: var(--color-surface);
+    color: var(--color-text);
+    background: var(--color-surface);
+    font-weight: 500;
+}
+
+.session-tab--editing {
+    border-color: var(--color-accent);
+    padding: 2px 4px;
+    overflow: visible;
+}
+
+.session-tab__rename-input {
+    border: none;
+    outline: none;
+    background: transparent;
+    color: var(--color-text);
+    font-size: 12px;
+    font-family: inherit;
+    width: 140px;
+    max-width: 100%;
+}
+
+.session-tab--new {
+    background: var(--color-accent);
+    border-color: var(--color-accent);
+    color: white;
+    font-weight: 600;
+    font-size: 14px;
+    padding: 2px 10px;
+    flex-shrink: 0;
+}
+
+.session-tab--new:hover {
+    background: var(--color-accent-hover, var(--color-accent));
+    border-color: var(--color-accent-hover, var(--color-accent));
+}
+
 /* ── Auth Overlay ───────────────────────────── */
 
 .auth-overlay {
