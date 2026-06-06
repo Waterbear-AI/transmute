@@ -58,4 +58,26 @@ test.describe('Agent markdown rendering', () => {
         await expect(messages).not.toContainText('## Emotional');
         await expect(messages).not.toContainText('> -');
     });
+
+    test('md-02: GFM table renders as a <table>, not literal pipe text', async ({ page }) => {
+        await page.evaluate(() => {
+            Chat.renderHistory([
+                { role: 'agent', text: "Here's your breakdown:\n\n| Sub-dimension | Your Score |\n|---|---|\n| Emotional Regulation | 3.5 |\n| **Trigger Awareness** | 1.67 |\n\nYour overall score is 2.79." },
+            ]);
+        });
+
+        const messages = page.locator('#chat-messages');
+        const table = messages.locator('table');
+        await expect(table).toHaveCount(1, { timeout: 5000 });
+        // Header cells render as <th>.
+        await expect(table.locator('thead th')).toHaveCount(2);
+        await expect(table.locator('thead th').first()).toHaveText('Sub-dimension');
+        // Body rows render as <tr>/<td>, with inline bold preserved in a cell.
+        await expect(table.locator('tbody tr')).toHaveCount(2);
+        await expect(table.locator('tbody td')).toHaveCount(4);
+        await expect(table.locator('tbody td strong')).toHaveText('Trigger Awareness');
+        // Literal table markup must NOT appear as text.
+        await expect(messages).not.toContainText('|---|');
+        await expect(messages).not.toContainText('| Sub-dimension');
+    });
 });

@@ -13,7 +13,8 @@ const Sanitize = (() => {
     // Allowlisted tags for formatted agent content
     const ALLOWED_TAGS = new Set([
         'b', 'i', 'em', 'strong', 'code', 'pre', 'br', 'p',
-        'ul', 'ol', 'li', 'a', 'span', 'blockquote', 'h1', 'h2', 'h3', 'h4'
+        'ul', 'ol', 'li', 'a', 'span', 'blockquote', 'h1', 'h2', 'h3', 'h4',
+        'table', 'thead', 'tbody', 'tr', 'th', 'td'
     ]);
 
     // Allowlisted attributes per tag
