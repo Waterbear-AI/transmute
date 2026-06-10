@@ -1,0 +1,11 @@
+{
+  "default_say": "I'm here — keep going.",
+  "transmutation_engine": [
+    {
+      "say": "Welcome back! You're in the Development phase. You have practice entries logged and your roadmap is active. How can I support your growth today?"
+    },
+    {
+      "say": "Great — keep up the consistent practice. Each entry brings you closer to your reassessment milestone."
+    }
+  ]
+}

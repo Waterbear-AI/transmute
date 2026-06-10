@@ -145,8 +145,9 @@ test-harness:
 	    sleep 1; \
 	  done; \
 	  echo "--- [4/4] Running Playwright harness spec ---"; \
+	  cd tests/e2e && \
 	  BASE_URL="$(BASE_URL)" \
 	  HARNESS_EMAIL="$(HARNESS_EMAIL)" \
-	    npx --prefix tests/e2e playwright test tests/e2e/harness-journey.spec.js; \
+	    npx playwright test harness-journey.spec.js; \
 	  echo "--- test-harness: PASSED ---"; \
 	'
