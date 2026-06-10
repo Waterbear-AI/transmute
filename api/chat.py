@@ -168,10 +168,10 @@ async def _stream_agent_response(
                 # Only record calls that actually consumed tokens (zero-token
                 # events are infra events, not real model calls).
                 if event_input or event_output:
-                    call_cost = _estimate_cost(event_input, event_output)
                     # In mock mode use "mock/scripted" so the cost pipeline
                     # reports $0.00 via the "mock/*" wildcard in config.yaml.
                     recorded_model_id = _MOCK_MODEL_ID if MOCK_MODE else _model_cfg.model_id
+                    call_cost = _estimate_cost(event_input, event_output, model_id=recorded_model_id)
                     _session_service.record_llm_call(
                         session_id=session_id,
                         user_id=user_id,
@@ -242,7 +242,9 @@ async def _stream_agent_response(
 
     # Emit cost tracking — per-turn delta plus session-cumulative totals so
     # the client can display a running total instead of just the last turn.
-    estimated_cost = _estimate_cost(total_input_tokens, total_output_tokens)
+    # Use the recorded model ID so mock mode resolves to $0.00 via "mock/*".
+    effective_model_id = _MOCK_MODEL_ID if MOCK_MODE else _model_cfg.model_id
+    estimated_cost = _estimate_cost(total_input_tokens, total_output_tokens, model_id=effective_model_id)
     total_input, total_output, total_cost = _session_service.update_token_usage(
         session_id=session_id,
         input_tokens=total_input_tokens,
@@ -285,9 +287,18 @@ def _get_user_phase(user_id: str) -> str | None:
         return None
 
 
-def _estimate_cost(input_tokens: int, output_tokens: int) -> float:
-    """Cost estimate using model-specific pricing from config.yaml."""
-    cost = _settings.get_cost_per_token(_model_cfg.model_id)
+def _estimate_cost(input_tokens: int, output_tokens: int, model_id: str | None = None) -> float:
+    """Cost estimate using model-specific pricing from config.yaml.
+
+    Args:
+        input_tokens: Number of prompt tokens.
+        output_tokens: Number of candidates tokens.
+        model_id: Model ID to look up in the cost table.  Defaults to the
+            configured model.  Pass ``_MOCK_MODEL_ID`` in mock mode so the
+            ``mock/*`` wildcard resolves to $0.00.
+    """
+    effective_model = model_id if model_id is not None else _model_cfg.model_id
+    cost = _settings.get_cost_per_token(effective_model)
     input_cost = (input_tokens / 1_000_000) * cost.input
     output_cost = (output_tokens / 1_000_000) * cost.output
     return input_cost + output_cost
