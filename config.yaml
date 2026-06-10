@@ -12,6 +12,7 @@ model_costs:
   gpt-4o: { input: 2.50, output: 10.00 }
   gpt-4o-mini: { input: 0.15, output: 0.60 }
   "ollama/*": { input: 0.00, output: 0.00 }
+  "mock/*": { input: 0.00, output: 0.00 }
 
 # Transmutation flow computation settings
 transmutation:

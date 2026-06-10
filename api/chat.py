@@ -5,10 +5,12 @@ POST /api/chat/{session_id} runs the ADK agent and streams events as SSE.
 
 import json
 import logging
-from typing import AsyncGenerator
+import os
+from typing import AsyncGenerator, Union
 
 from fastapi import APIRouter, Depends, HTTPException, Request
 from fastapi.responses import StreamingResponse
+from google.adk.models.base_llm import BaseLlm
 from google.genai import types as genai_types
 from pydantic import BaseModel
 
@@ -33,6 +35,9 @@ LLMRegistry._register(".*", LiteLlm)
 _settings = get_settings()
 _model_cfg = _settings.model
 
+#: Model ID recorded in llm_calls when mock mode is active.
+_MOCK_MODEL_ID = "mock/scripted"
+
 
 def _resolve_model_string() -> str:
     """Build a litellm-compatible model string from config."""
@@ -49,11 +54,56 @@ def _resolve_model_string() -> str:
     return model_id
 
 
-# Shared instances
+def _build_model() -> Union[str, BaseLlm]:
+    """Return a MockLlm instance or a litellm model string.
+
+    When the ``TRANSMUTE_MOCK_SCENARIO`` environment variable is set, loads
+    the named scenario file and returns a ``MockLlm`` instance. The MockLlm
+    is passed directly to ``create_transmutation_agent`` (instance injection
+    bypasses ``LLMRegistry``).
+
+    Raises ``ScenarioError`` at startup if the file is missing or malformed —
+    better to fail fast than to run half-configured.
+
+    Secure default: absent env var → real provider, no MockLlm import
+    side effects.
+    """
+    scenario_path = os.environ.get("TRANSMUTE_MOCK_SCENARIO")
+    if scenario_path:
+        # Import lazily so the module has no side effects when env var is absent.
+        from agents.transmutation.mock_llm import MockLlm, ScenarioScript
+
+        scenario = ScenarioScript.load(scenario_path)
+        mock = MockLlm(scenario=scenario)
+
+        logger.warning(
+            "\n"
+            "╔══════════════════════════════════════════════════════════╗\n"
+            "║  ⚠  MOCK MODE ACTIVE — NO REAL LLM CALLS WILL BE MADE  ║\n"
+            "║  Scenario: %-46s  ║\n"
+            "║  Model ID: %-46s  ║\n"
+            "║  State is shared across sessions; restart to reset.     ║\n"
+            "╚══════════════════════════════════════════════════════════╝",
+            scenario_path,
+            _MOCK_MODEL_ID,
+        )
+        return mock
+
+    return _resolve_model_string()
+
+
+# Shared instances — built once at module import time.
 _session_service = SqliteSessionService()
-_model_string = _resolve_model_string()
-logger.info("Using model: %s (provider: %s)", _model_string, _model_cfg.provider)
-_agent = create_transmutation_agent(model=_model_string)
+_model = _build_model()
+
+#: True when the server is running in scripted mock mode.
+#: Exported for api/health.py and other consumers.
+MOCK_MODE: bool = isinstance(_model, BaseLlm)
+
+if not MOCK_MODE:
+    logger.info("Using model: %s (provider: %s)", _model, _model_cfg.provider)
+
+_agent = create_transmutation_agent(model=_model)
 _runner = Runner(
     agent=_agent,
     app_name="transmutation",
@@ -119,12 +169,15 @@ async def _stream_agent_response(
                 # events are infra events, not real model calls).
                 if event_input or event_output:
                     call_cost = _estimate_cost(event_input, event_output)
+                    # In mock mode use "mock/scripted" so the cost pipeline
+                    # reports $0.00 via the "mock/*" wildcard in config.yaml.
+                    recorded_model_id = _MOCK_MODEL_ID if MOCK_MODE else _model_cfg.model_id
                     _session_service.record_llm_call(
                         session_id=session_id,
                         user_id=user_id,
                         author=event.author,
                         phase=current_phase,
-                        model_id=_model_cfg.model_id,
+                        model_id=recorded_model_id,
                         input_tokens=event_input,
                         output_tokens=event_output,
                         cost_usd=call_cost,

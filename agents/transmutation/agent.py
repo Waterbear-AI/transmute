@@ -5,8 +5,11 @@ to sub-agents (assessment, profile) based on the user's current phase.
 ADK's built-in agent transfer uses sub-agent descriptions for routing.
 """
 
+from typing import Union
+
 from google.adk.agents import LlmAgent
 from google.adk.agents.readonly_context import ReadonlyContext
+from google.adk.models.base_llm import BaseLlm
 
 from agents.transmutation.prompts.shared.safety import PROMPT as SAFETY
 from agents.transmutation.prompts.shared.boundary import PROMPT as BOUNDARY
@@ -67,12 +70,13 @@ def _root_instruction(ctx: ReadonlyContext) -> str:
     return _ROOT_INSTRUCTION_TEMPLATE.format(user_id=user_id) + "\n\n" + _STATIC_SECTIONS
 
 
-def create_transmutation_agent(model: str = "") -> LlmAgent:
+def create_transmutation_agent(model: Union[str, BaseLlm] = "") -> LlmAgent:
     """Create the root Transmutation Engine agent with sub-agents.
 
     Args:
-        model: LLM model identifier (e.g. "claude-sonnet-4-20250514").
-               If empty, uses the ADK default.
+        model: LLM model identifier (e.g. "claude-sonnet-4-20250514") or a
+               ``BaseLlm`` instance (e.g. ``MockLlm`` for harness testing).
+               If empty string, uses the ADK default.
     """
     assessment_agent = create_assessment_agent(model=model)
     profile_agent = create_profile_agent(model=model)

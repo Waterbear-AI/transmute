@@ -1,4 +1,7 @@
+from typing import Union
+
 from google.adk.agents import LlmAgent
+from google.adk.models.base_llm import BaseLlm
 
 from agents.transmutation.prompts.assessment_prompt import PROMPT
 from agents.transmutation.sub_agents.inject_user_id import with_user_id
@@ -21,7 +24,7 @@ DESCRIPTION = (
 )
 
 
-def create_assessment_agent(model: str = "") -> LlmAgent:
+def create_assessment_agent(model: Union[str, BaseLlm] = "") -> LlmAgent:
     """Create the Assessment sub-agent with its tools and prompt."""
     return LlmAgent(
         name="assessment_agent",
