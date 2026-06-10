@@ -359,6 +359,60 @@ class TestSeedDevelopment:
         result = advance_phase(uid, "reassessment", reason="gate test")
         assert "error" not in result, f"Gate failed: {result}"
 
+    def test_development_gate_fails_insufficient_entries_and_days(self):
+        """Negative control: gate fails when entries < 10 AND roadmap < 30 days old."""
+        from db.database import get_db_session
+        from scripts.seed_phase import seed_development
+        from agents.transmutation.tools import advance_phase
+
+        uid = self._seed_to_education_phase()
+
+        # 3 entries + only 2 days ago — satisfies neither branch of the gate
+        with get_db_session() as conn:
+            seed_development(conn, uid, entries=3, days_ago=2)
+
+        result = advance_phase(uid, "reassessment", reason="negative gate test")
+        assert "error" in result, (
+            f"Expected gate to fail with insufficient entries+days, "
+            f"but advance_phase succeeded: {result}"
+        )
+
+
+# ---------------------------------------------------------------------------
+# Integration tests: check-in detection via detect_check_in_regression
+# ---------------------------------------------------------------------------
+
+
+class TestCheckInDetection:
+    """Verify that detect_check_in_regression returns evaluated=True after
+    a fully seeded check_in user (i.e. all prerequisite rows exist)."""
+
+    def test_detect_regression_evaluated_after_seed(self):
+        """detect_check_in_regression returns evaluated=True for a seeded check_in user."""
+        from scripts.seed_phase import main
+        from agents.transmutation.tools import detect_check_in_regression
+
+        email = f"detect-{os.urandom(4).hex()}@test.com"
+        rc = main([
+            "--phase", "check_in",
+            "--email", email,
+            "--entries", "10",
+            "--days-ago", "35",
+        ])
+        assert rc == 0
+
+        from db.database import get_db_session
+        with get_db_session() as conn:
+            user = conn.execute(
+                "SELECT id FROM users WHERE email = ?", (email,)
+            ).fetchone()
+        uid = user["id"]
+
+        result = detect_check_in_regression(uid)
+        assert result.get("evaluated") is True, (
+            f"Expected evaluated=True after full check_in seed, got: {result}"
+        )
+
 
 # ---------------------------------------------------------------------------
 # Integration test: --force option
@@ -458,6 +512,79 @@ class TestFullPhaseProgression:
                 "SELECT id FROM graduation_record WHERE user_id = ?", (uid,)
             ).fetchone()
             assert grad is not None, "graduation_record row missing"
+
+    def test_seed_to_check_in_succeeds(self):
+        """--phase check_in seeds all the way to the check_in phase."""
+        from scripts.seed_phase import main
+
+        email = f"checkin-{os.urandom(4).hex()}@test.com"
+        rc = main([
+            "--phase", "check_in",
+            "--email", email,
+            "--entries", "10",
+            "--days-ago", "35",
+        ])
+        assert rc == 0
+
+    def test_check_in_user_has_required_rows(self):
+        """After --phase check_in: user is in check_in phase and check_in_log exists."""
+        from db.database import get_db_session
+        from scripts.seed_phase import main
+
+        email = f"ci-check-{os.urandom(4).hex()}@test.com"
+        main([
+            "--phase", "check_in",
+            "--email", email,
+            "--entries", "10",
+            "--days-ago", "35",
+        ])
+
+        with get_db_session() as conn:
+            user = conn.execute(
+                "SELECT id, current_phase FROM users WHERE email = ?", (email,)
+            ).fetchone()
+            uid = user["id"]
+            assert user["current_phase"] == "check_in"
+
+            # graduation_record must exist (prerequisite for check_in)
+            grad = conn.execute(
+                "SELECT id FROM graduation_record WHERE user_id = ?", (uid,)
+            ).fetchone()
+            assert grad is not None, "graduation_record row missing"
+
+            # check_in_log must have one row
+            log = conn.execute(
+                "SELECT id FROM check_in_log WHERE user_id = ?", (uid,)
+            ).fetchone()
+            assert log is not None, "check_in_log row missing"
+
+    def test_with_completed_check_in_advances_back_to_graduated(self):
+        """--with-completed-check-in: user ends up in graduated, check_in_log exists."""
+        from db.database import get_db_session
+        from scripts.seed_phase import main
+
+        email = f"ci-comp-{os.urandom(4).hex()}@test.com"
+        rc = main([
+            "--phase", "check_in",
+            "--email", email,
+            "--entries", "10",
+            "--days-ago", "35",
+            "--with-completed-check-in",
+        ])
+        assert rc == 0
+
+        with get_db_session() as conn:
+            user = conn.execute(
+                "SELECT id, current_phase FROM users WHERE email = ?", (email,)
+            ).fetchone()
+            uid = user["id"]
+            # After completing check-in the user advances back to graduated
+            assert user["current_phase"] == "graduated"
+
+            log = conn.execute(
+                "SELECT id FROM check_in_log WHERE user_id = ?", (uid,)
+            ).fetchone()
+            assert log is not None, "check_in_log row missing after completed check-in"
 
     def test_seeded_user_phase_matches_target(self):
         """Each phase target produces a user in the expected phase.
