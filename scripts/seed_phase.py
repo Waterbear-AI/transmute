@@ -681,6 +681,10 @@ def _delete_user(conn, user_id: str) -> None:
     All deletes run in a single transaction managed by the caller.
     """
     fk_tables = [
+        # llm_calls references both users and adk_sessions; adk_sessions
+        # references users — both must go before the users row, llm_calls first.
+        "llm_calls",
+        "adk_sessions",
         "check_in_log",
         "graduation_record",
         "practice_journal",

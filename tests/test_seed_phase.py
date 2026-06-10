@@ -439,6 +439,49 @@ class TestForceOption:
         rc3 = main(["--phase", "assessment", "--email", email, "--force"])
         assert rc3 == 0
 
+    def test_force_succeeds_when_user_has_chat_sessions(self):
+        """Regression: _delete_user must also clear adk_sessions and llm_calls.
+
+        A seeded user who has logged in and chatted owns adk_sessions rows
+        (and llm_calls rows referencing them). --force previously deleted
+        every other FK table but not these, so DELETE FROM users raised
+        sqlite3.IntegrityError: FOREIGN KEY constraint failed.
+        """
+        from db.database import get_db_session
+        from scripts.seed_phase import main
+
+        email = f"sessions-{os.urandom(4).hex()}@test.com"
+
+        rc1 = main(["--phase", "assessment", "--email", email])
+        assert rc1 == 0
+
+        with get_db_session() as conn:
+            user_id = conn.execute(
+                "SELECT id FROM users WHERE email = ?", (email,)
+            ).fetchone()["id"]
+            conn.execute(
+                "INSERT INTO adk_sessions (session_id, user_id, app_name) VALUES (?, ?, ?)",
+                ("sess-force-regression", user_id, "transmute"),
+            )
+            conn.execute(
+                "INSERT INTO llm_calls (session_id, user_id, model_id, input_tokens, output_tokens, cost_usd) "
+                "VALUES (?, ?, ?, ?, ?, ?)",
+                ("sess-force-regression", user_id, "mock/scripted", 10, 20, 0.0),
+            )
+
+        rc2 = main(["--phase", "assessment", "--email", email, "--force"])
+        assert rc2 == 0
+
+        with get_db_session() as conn:
+            sessions = conn.execute(
+                "SELECT session_id FROM adk_sessions WHERE user_id = ?", (user_id,)
+            ).fetchall()
+            calls = conn.execute(
+                "SELECT id FROM llm_calls WHERE user_id = ?", (user_id,)
+            ).fetchall()
+        assert sessions == []
+        assert calls == []
+
     def test_force_leaves_only_one_user(self):
         from db.database import get_db_session
         from scripts.seed_phase import main
