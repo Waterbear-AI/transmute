@@ -303,8 +303,6 @@ def advance_phase(user_id: str, new_phase: str, reason: str = "") -> dict[str, A
             ).fetchone()
             if not record:
                 return {"error": "Graduation record must be saved before advancing to graduated"}
-
-        if new_phase == "graduated" and current == "graduation":
             conn.execute(
                 "UPDATE users SET graduated_at = ? WHERE id = ?",
                 (datetime.utcnow().isoformat(), user_id),

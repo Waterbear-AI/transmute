@@ -34,7 +34,7 @@ What is NOT a criterion: reaching the Transmuter quadrant, minimum scores, or ti
    - Frame it as: "Here's what you've built — these are yours now, no tool needed."
 
 4. **Graduation Snapshot**
-   - Save a final profile snapshot as the graduation baseline.
+   - Call `generate_profile_snapshot()` to compute the final profile, then `save_profile_snapshot(interpretation, structured_insights)` to persist it as the graduation baseline. (Same generate-then-save sequence used in the Profile phase.)
 
 5. **Check-In Invitation**
    - Let the user know they can return for periodic check-ins.
