@@ -265,6 +265,48 @@ class TestUpdateRoadmap:
         assert result["parent_roadmap_id"] == original_id
 
 
+class TestSaveRoadmapReplacementCooldown:
+    """save_roadmap must not bypass the adjustment cooldown update_roadmap enforces."""
+
+    def _backdate_roadmap(self, uid, **delta):
+        backdated = (datetime.utcnow() - timedelta(**delta)).isoformat()
+        with get_db_session() as conn:
+            conn.execute(
+                "UPDATE development_roadmap SET created_at = ? WHERE user_id = ?",
+                (backdated, uid),
+            )
+
+    def test_replacement_rejected_within_cooldown(self):
+        uid = _create_user(phase="development")
+        assert save_roadmap(uid, {"steps": [1, 2, 3]})["saved"] is True
+        self._backdate_roadmap(uid, days=2)
+
+        result = save_roadmap(uid, {"steps": [4, 5, 6]})
+        assert "error" in result
+        assert "cooldown" in result["error"].lower()
+        assert result["days_remaining"] == 5
+        with get_db_session() as conn:
+            count = conn.execute(
+                "SELECT COUNT(*) as cnt FROM development_roadmap WHERE user_id = ?",
+                (uid,),
+            ).fetchone()["cnt"]
+        assert count == 1  # rejected save wrote nothing
+
+    def test_resave_allowed_within_authoring_grace(self):
+        uid = _create_user(phase="development")
+        save_roadmap(uid, {"steps": [1, 2, 3]})
+        # Same-conversation correction (e.g. retry after a validation error)
+        result = save_roadmap(uid, {"steps": [1, 2, 3, 4]})
+        assert result["saved"] is True
+
+    def test_new_roadmap_allowed_after_cooldown(self):
+        uid = _create_user(phase="development")
+        save_roadmap(uid, {"steps": [1, 2, 3]})
+        self._backdate_roadmap(uid, days=8)
+        result = save_roadmap(uid, {"steps": [4, 5, 6]})
+        assert result["saved"] is True
+
+
 # ── TEST-003: Reassessment Agent sentinel and graduation logic ──
 
 

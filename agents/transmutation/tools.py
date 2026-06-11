@@ -1,7 +1,7 @@
 import json
 import logging
 import uuid
-from datetime import datetime
+from datetime import datetime, timedelta
 from typing import Any, Optional
 
 from db.database import get_db_session
@@ -1427,6 +1427,15 @@ def generate_roadmap(user_id: str) -> dict[str, Any]:
     }
 
 
+# Roadmap pacing: update_roadmap enforces this cooldown for adjustments, and
+# save_roadmap enforces the same window for whole-roadmap replacement so the
+# cooldown can't be bypassed by simply authoring a new roadmap. Re-saves inside
+# the grace window stay allowed — same-conversation authoring retries (e.g. the
+# LLM correcting a validation error) rely on the roadmap_practices upsert.
+ROADMAP_ADJUSTMENT_COOLDOWN_DAYS = 7
+ROADMAP_AUTHORING_GRACE = timedelta(hours=1)
+
+
 def save_roadmap(user_id: str, roadmap: dict) -> dict[str, Any]:
     """Persist a development roadmap. Emits development.roadmap SSE event.
 
@@ -1435,6 +1444,10 @@ def save_roadmap(user_id: str, roadmap: dict) -> dict[str, Any]:
     "transmutation_operation"}). When present, validates every practice and upserts
     into roadmap_practices in the same transaction. On any validation failure,
     returns an error and saves nothing.
+
+    Replacing an existing roadmap is rejected while the adjustment cooldown is
+    active (older than ROADMAP_AUTHORING_GRACE, younger than
+    ROADMAP_ADJUSTMENT_COOLDOWN_DAYS) — use update_roadmap for adjustments.
 
     Legacy roadmaps with no ``practices`` key are saved as-is with no upsert.
     """
@@ -1466,6 +1479,27 @@ def save_roadmap(user_id: str, roadmap: dict) -> dict[str, Any]:
     now = datetime.utcnow().isoformat()
 
     with get_db_session() as conn:
+        latest = conn.execute(
+            "SELECT created_at FROM development_roadmap WHERE user_id = ? ORDER BY created_at DESC LIMIT 1",
+            (user_id,),
+        ).fetchone()
+        if latest:
+            age = datetime.utcnow() - datetime.fromisoformat(latest["created_at"])
+            if ROADMAP_AUTHORING_GRACE <= age < timedelta(days=ROADMAP_ADJUSTMENT_COOLDOWN_DAYS):
+                days_remaining = ROADMAP_ADJUSTMENT_COOLDOWN_DAYS - age.days
+                logger.info(
+                    "save_roadmap: replacement rejected within adjustment cooldown",
+                    extra={"user_id": user_id, "roadmap_age_days": age.days},
+                )
+                return {
+                    "error": "Roadmap replacement cooldown active",
+                    "days_remaining": days_remaining,
+                    "message": (
+                        f"A roadmap was created {age.days} day(s) ago. Use update_roadmap to adjust it, "
+                        f"or wait {days_remaining} more day(s) to author a new one."
+                    ),
+                }
+
         conn.execute(
             "INSERT INTO development_roadmap (id, user_id, roadmap, created_at) VALUES (?, ?, ?, ?)",
             (roadmap_id, user_id, json.dumps(roadmap), now),
@@ -1696,14 +1730,15 @@ def update_roadmap(
         if not current:
             return {"error": "No existing roadmap to adjust"}
 
-        # Enforce 7-day cooldown
+        # Enforce the shared adjustment cooldown
         created_at = datetime.fromisoformat(current["created_at"])
         days_since = (datetime.utcnow() - created_at).days
-        if days_since < 7:
+        if days_since < ROADMAP_ADJUSTMENT_COOLDOWN_DAYS:
+            days_remaining = ROADMAP_ADJUSTMENT_COOLDOWN_DAYS - days_since
             return {
                 "error": "Roadmap adjustment cooldown active",
-                "days_remaining": 7 - days_since,
-                "message": f"Roadmap was last updated {days_since} day(s) ago. Wait {7 - days_since} more day(s).",
+                "days_remaining": days_remaining,
+                "message": f"Roadmap was last updated {days_since} day(s) ago. Wait {days_remaining} more day(s).",
             }
 
         current_roadmap = json.loads(current["roadmap"] or "{}")
