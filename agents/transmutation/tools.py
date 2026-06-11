@@ -280,9 +280,21 @@ def advance_phase(user_id: str, new_phase: str, reason: str = "") -> dict[str, A
             if snapshots["cnt"] < 2:
                 return {"error": "Comparison snapshot must exist before returning to development"}
 
+        if new_phase == "development":
+            # Reset self-assessed readiness so a fresh development cycle cannot
+            # inherit a stale "I'm ready" flag from a prior cycle (ADR-5, FR-3).
+            conn.execute(
+                "UPDATE users SET self_assessed_readiness = 0 WHERE id = ?",
+                (user_id,),
+            )
+
         if new_phase == "graduation" and current == "reassessment":
-            # 2-of-3 graduation indicators must be met (checked via tool)
-            pass  # evaluate_graduation_readiness is called by the agent before this
+            # Enforce 2-of-3 graduation indicators server-side.
+            # The gate runs inside this transaction so the readiness check and
+            # the phase UPDATE are atomic (ADR-1, backend-business-logic-protection).
+            gate = _check_graduation_readiness_gate(conn, user_id)
+            if gate:
+                return gate
 
         if new_phase == "graduated" and current == "graduation":
             record = conn.execute(
@@ -1934,28 +1946,33 @@ def generate_comparison_snapshot(
     return result
 
 
-def evaluate_graduation_readiness(user_id: str) -> dict[str, Any]:
-    """Deterministically check the 3 graduation convergence indicators.
+def _evaluate_graduation_readiness(conn, user_id: str) -> dict[str, Any]:
+    """Compute the 3 graduation convergence indicators using a caller-supplied conn.
+
+    Reads self_assessed_readiness from the users table (durable, not from
+    session state — ADK flushes session_state at turn-end which would clobber
+    a direct tool write; users table is the correct home for per-user flags).
 
     Indicators (any 2 of 3 triggers graduation):
-    1. Pattern Stability: Delta < 5% across all targeted dims for 2 consecutive cycles
-    2. Quadrant Consolidation: Same quadrant for 2 consecutive reassessments
-    3. Self-Assessed Readiness: User explicitly indicated readiness (stored in session state)
+    1. Pattern Stability: max normalized delta < threshold for 2 consecutive cycles
+    2. Quadrant Consolidation: same archetype for 2 consecutive reassessments
+    3. Self-Assessed Readiness: users.self_assessed_readiness == 1
 
     NOT criteria: reaching Transmuter quadrant, minimum score, time deadline.
-    """
-    with get_db_session() as conn:
-        # Get the 3 most recent profile snapshots (need 3 to check "2 consecutive")
-        snapshots = conn.execute(
-            "SELECT * FROM profile_snapshots WHERE user_id = ? ORDER BY created_at DESC LIMIT 3",
-            (user_id,),
-        ).fetchall()
 
-        # Check self-assessed readiness from session state
-        session_row = conn.execute(
-            "SELECT session_state FROM adk_sessions WHERE user_id = ? AND archived = FALSE ORDER BY created_at DESC LIMIT 1",
-            (user_id,),
-        ).fetchone()
+    Returns same dict shape as evaluate_graduation_readiness for back-compat.
+    """
+    # Get the 3 most recent profile snapshots (need 3 to check "2 consecutive")
+    snapshots = conn.execute(
+        "SELECT * FROM profile_snapshots WHERE user_id = ? ORDER BY created_at DESC LIMIT 3",
+        (user_id,),
+    ).fetchall()
+
+    # Read self-assessed readiness from the users table (durable storage)
+    user_row = conn.execute(
+        "SELECT self_assessed_readiness FROM users WHERE id = ?",
+        (user_id,),
+    ).fetchone()
 
     indicators = {
         "pattern_stability": {"met": False, "evidence": ""},
@@ -1964,8 +1981,12 @@ def evaluate_graduation_readiness(user_id: str) -> dict[str, Any]:
     }
 
     if len(snapshots) < 3:
-        indicators["pattern_stability"]["evidence"] = f"Only {len(snapshots)} snapshots; need at least 3 for two consecutive cycles"
-        indicators["quadrant_consolidation"]["evidence"] = f"Only {len(snapshots)} snapshots; need at least 3"
+        indicators["pattern_stability"]["evidence"] = (
+            f"Only {len(snapshots)} snapshots; need at least 3 for two consecutive cycles"
+        )
+        indicators["quadrant_consolidation"]["evidence"] = (
+            f"Only {len(snapshots)} snapshots; need at least 3"
+        )
     else:
         # Snapshots are newest-first: [current, previous, before_previous]
         scores = [json.loads(s["scores"] or "{}") for s in snapshots]
@@ -2018,18 +2039,16 @@ def evaluate_graduation_readiness(user_id: str) -> dict[str, Any]:
             f"({'all same' if consolidation_met else 'not consolidated'})"
         )
 
-    # 3. Self-Assessed Readiness: check session state
-    if session_row:
-        state = json.loads(session_row["session_state"] or "{}")
-        readiness = state.get("self_assessed_readiness", False)
-        indicators["self_assessed_readiness"]["met"] = bool(readiness)
+    # 3. Self-Assessed Readiness: read from users table (set by record_self_assessed_readiness)
+    if user_row is not None:
+        readiness = bool(user_row["self_assessed_readiness"])
+        indicators["self_assessed_readiness"]["met"] = readiness
         indicators["self_assessed_readiness"]["evidence"] = (
             "User indicated readiness" if readiness else "User has not indicated readiness"
         )
     else:
-        indicators["self_assessed_readiness"]["evidence"] = "No active session found"
+        indicators["self_assessed_readiness"]["evidence"] = "User not found"
 
-    # Count how many indicators are met
     met_count = sum(1 for ind in indicators.values() if ind["met"])
     graduation_ready = met_count >= 2
 
@@ -2040,6 +2059,71 @@ def evaluate_graduation_readiness(user_id: str) -> dict[str, Any]:
         "indicators_required": 2,
         "indicators": indicators,
     }
+
+
+def _check_graduation_readiness_gate(conn, user_id: str) -> Optional[dict]:
+    """Gate helper: return an error dict if graduation criteria are not yet met.
+
+    Mirrors _check_development_completion_gate — returns None when ready, a
+    structured rejection dict when not. Logs indicator details server-side so
+    the agent can relay a generic message without exposing thresholds.
+    """
+    result = _evaluate_graduation_readiness(conn, user_id)
+    if result["graduation_ready"]:
+        return None  # Gate passes — allow the graduation transition
+
+    logger.info(
+        "Graduation gate blocked for user %s: %d/%d indicators met. indicators=%s",
+        user_id,
+        result["indicators_met"],
+        result["indicators_required"],
+        result["indicators"],
+    )
+    return {
+        "error": "Graduation criteria not yet met",
+        "indicators_met": result["indicators_met"],
+        "indicators_required": result["indicators_required"],
+        "indicators": result["indicators"],
+    }
+
+
+def evaluate_graduation_readiness(user_id: str) -> dict[str, Any]:
+    """Thin public wrapper: open a DB session and delegate to the helper.
+
+    Signature and return shape are unchanged — existing callers (reassessment
+    agent, api/results.py) are unaffected. The computation now lives in
+    _evaluate_graduation_readiness so it can also run inside advance_phase's
+    open transaction without nesting sessions (ADR-1).
+    """
+    with get_db_session() as conn:
+        return _evaluate_graduation_readiness(conn, user_id)
+
+
+def record_self_assessed_readiness(user_id: str) -> dict[str, Any]:
+    """Durably record that the user stated they are ready for graduation.
+
+    Sets users.self_assessed_readiness = 1 so the deterministic graduation gate
+    can count it as an indicator. Idempotent — safe to call multiple times.
+    Reset to 0 happens automatically when the user re-enters development phase.
+
+    Returns:
+        {"event_type": "graduation.readiness_recorded", "recorded": True}
+        {"error": "User not found"} if the user_id does not exist
+    """
+    with get_db_session() as conn:
+        user_row = conn.execute(
+            "SELECT id FROM users WHERE id = ?", (user_id,)
+        ).fetchone()
+        if not user_row:
+            return {"error": "User not found"}
+
+        conn.execute(
+            "UPDATE users SET self_assessed_readiness = 1 WHERE id = ?",
+            (user_id,),
+        )
+
+    logger.info("Self-assessed readiness recorded for user %s", user_id)
+    return {"event_type": "graduation.readiness_recorded", "recorded": True}
 
 
 # ── Graduation Agent tools ─────────────────────────────────────────────
