@@ -331,4 +331,78 @@ test.describe('Development tab', () => {
     expect(jsErrors, 'JS errors: ' + jsErrors.join('; ')).toHaveLength(0);
   });
 
+  test('live-updates journal and gate count on development.practice SSE event (FR-9)', async ({ page }) => {
+    const jsErrors = [];
+    page.on('pageerror', err => jsErrors.push(err.message));
+
+    // Mutable payload: the development.practice handler refetches /api/results
+    // (it does NOT trust the event payload — ADR-4 / the SSE-refetch bug fix),
+    // so we swap in an updated payload before firing the event and assert the
+    // tab re-renders from the refetch — proving live update without page reload.
+    let current = JSON.parse(JSON.stringify(SEEDED_DEVELOPMENT_RESULTS));
+
+    await page.route('**/auth/me', route => route.fulfill({
+      status: 200,
+      contentType: 'application/json',
+      body: JSON.stringify({
+        user_id: current.user_id,
+        name: 'Dev User',
+        email: 'dev@test.example.com',
+        current_phase: 'development',
+      }),
+    }));
+    await page.route('**/api/sessions', route => route.fulfill({
+      status: 200,
+      contentType: 'application/json',
+      body: JSON.stringify({ sessions: [] }),
+    }));
+    await page.route('**/api/results/**', route => route.fulfill({
+      status: 200,
+      contentType: 'application/json',
+      body: JSON.stringify(current),
+    }));
+
+    await page.goto('/');
+    await page.locator('#app').waitFor({ state: 'visible', timeout: 10000 });
+    const devTab = page.locator('.results-tab', { hasText: 'Development' });
+    await devTab.waitFor({ state: 'visible', timeout: 5000 });
+    await devTab.click();
+
+    // Initial state: 2 journal entries, gate shows 6 / 10.
+    await page.locator('.journal-entry').first().waitFor({ state: 'visible', timeout: 5000 });
+    await expect(page.locator('.journal-entry')).toHaveCount(2);
+    await expect(page.locator('.dev-gate-block')).toContainText('6 / 10');
+
+    // A new practice entry lands server-side; point the route at the richer payload.
+    const updated = JSON.parse(JSON.stringify(SEEDED_DEVELOPMENT_RESULTS));
+    updated.development.total_entries = 7;
+    updated.development.practice_count = 7;
+    updated.development.gate.entries_logged = 7;
+    updated.development.recent_entries.unshift({
+      practice_id: 'p1',
+      reflection: 'Logged a fresh practice just now.',
+      self_rating: 9,
+      dimension: 'Emotional Awareness',
+      created_at: new Date().toISOString(),
+    });
+    current = updated;
+
+    // Fire the event exactly as chat.js does (Results is a global in these
+    // classic non-module scripts). The handler refetches /api/results — now
+    // serving `updated` — and re-renders the active Development tab in place.
+    await page.evaluate(() => {
+      // eslint-disable-next-line no-undef
+      Results.handleSSEEvent('development.practice', { event_type: 'development.practice', total_entries: 7 });
+    });
+
+    // UI reflects the refetched payload; no navigation occurred.
+    await expect(page.locator('.journal-entry')).toHaveCount(3);
+    await expect(
+      page.locator('.journal-entry').first().locator('.journal-entry__reflection')
+    ).toContainText('fresh practice just now');
+    await expect(page.locator('.dev-gate-block')).toContainText('7 / 10');
+
+    expect(jsErrors, 'JS errors: ' + jsErrors.join('; ')).toHaveLength(0);
+  });
+
 });
