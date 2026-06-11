@@ -11,6 +11,7 @@ from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel
 
 from agents.transmutation.tools import (
+    SNAPSHOT_KIND_CHECK_IN,
     detect_check_in_regression,
     generate_comparison_snapshot,
     get_development_gate_progress,
@@ -167,6 +168,20 @@ class CheckInResponse(BaseModel):
     latest_comparison: Optional[CheckInComparison] = None               # NEW
 
 
+class ReassessmentResponse(BaseModel):
+    """Derived reassessment comparison surfaced to the Results panel.
+
+    available=True when the latest profile snapshot is a reassessment (sentinel-marked)
+    and at least one prior snapshot exists, so a delta comparison can be computed.
+    Reuses CheckInComparison sub-models (structurally identical; rename deferred per spec).
+    """
+    available: bool
+    kind: str = "reassessment"
+    cycle: Optional[int] = None
+    latest_created_at: Optional[str] = None
+    latest_comparison: Optional[CheckInComparison] = None
+
+
 class ResultsResponse(BaseModel):
     user_id: str
     current_phase: Optional[str] = None
@@ -177,6 +192,110 @@ class ResultsResponse(BaseModel):
     development: Optional[DevelopmentResponse] = None
     graduation: Optional[GraduationResponse] = None
     check_ins: Optional[CheckInResponse] = None
+    reassessment: Optional[ReassessmentResponse] = None
+
+
+def _derive_reassessment(user_id: str) -> ReassessmentResponse:
+    """Derive the reassessment comparison for a user.
+
+    Detects whether the latest profile_snapshot is a reassessment (sentinel-marked),
+    and if so, computes the comparison against the prior snapshot by reusing
+    generate_comparison_snapshot.
+
+    Returns ReassessmentResponse with available=False when:
+    - Fewer than two snapshots exist
+    - Latest snapshot is not a reassessment (no sentinel key)
+    - generate_comparison_snapshot returns an error (error is logged)
+    """
+    with get_db_session() as conn:
+        snapshot_rows = conn.execute(
+            "SELECT id, quadrant_placement, created_at FROM profile_snapshots "
+            "WHERE user_id = ? ORDER BY created_at DESC LIMIT 2",
+            (user_id,),
+        ).fetchall()
+
+        cycle_from_user = conn.execute(
+            "SELECT reassessment_cycle FROM users WHERE id = ?",
+            (user_id,),
+        ).fetchone()
+
+    if len(snapshot_rows) < 2:
+        return ReassessmentResponse(available=False)
+
+    latest_row = snapshot_rows[0]
+    previous_row = snapshot_rows[1]
+
+    # Detect reassessment via the sentinel marker in quadrant_placement JSON.
+    # Robust parse: guard isinstance(parsed, dict) since baseline snapshots may
+    # persist a non-dict payload (tools.py:977).
+    try:
+        parsed_qp = json.loads(latest_row["quadrant_placement"] or "{}")
+    except (json.JSONDecodeError, TypeError):
+        parsed_qp = {}
+
+    if not isinstance(parsed_qp, dict):
+        return ReassessmentResponse(available=False)
+
+    if "sentinel" not in parsed_qp:
+        return ReassessmentResponse(available=False)
+
+    # Distinguish reassessment from check-in; both can have marker keys.
+    # Check-ins carry kind=SNAPSHOT_KIND_CHECK_IN; reassessments carry sentinel.
+    # Per tools.py:942: "sentinel and kind never co-occur" — this guard is
+    # defensive in case that invariant is ever violated.
+    if parsed_qp.get("kind") == SNAPSHOT_KIND_CHECK_IN:
+        return ReassessmentResponse(available=False)
+
+    sentinel_block = parsed_qp["sentinel"]
+    cycle: Optional[int] = None
+    if isinstance(sentinel_block, dict):
+        cycle = sentinel_block.get("cycle")
+    if cycle is None and cycle_from_user:
+        cycle = cycle_from_user["reassessment_cycle"]
+
+    # Derive comparison via existing tool (DRY — same tool the check-in path uses).
+    try:
+        comp = generate_comparison_snapshot(user_id, previous_row["id"])
+    except Exception as exc:
+        logger.warning(
+            "reassessment comparison snapshot derivation failed for user %s: %s",
+            user_id, exc, exc_info=True,
+        )
+        return ReassessmentResponse(available=False)
+
+    if "error" in comp:
+        logger.warning(
+            "generate_comparison_snapshot error for reassessment (user %s): %s",
+            user_id, comp["error"],
+        )
+        return ReassessmentResponse(available=False)
+
+    # Build latest_comparison from explicit named keys (flow_deltas excluded per spec).
+    deltas_raw = comp.get("deltas") or {}
+    deltas = {
+        dim: CheckInComparisonDelta(**delta_data)
+        for dim, delta_data in deltas_raw.items()
+    }
+    qs_raw = comp.get("quadrant_shift") or {}
+    latest_comparison = CheckInComparison(
+        current_snapshot_id=comp["current_snapshot_id"],
+        previous_snapshot_id=comp["previous_snapshot_id"],
+        deltas=deltas,
+        quadrant_shift=CheckInQuadrantShift(
+            previous=qs_raw.get("previous", ""),
+            current=qs_raw.get("current", ""),
+            shifted=qs_raw.get("shifted", False),
+        ),
+        current_created_at=comp.get("current_created_at"),
+        previous_created_at=comp.get("previous_created_at"),
+    )
+
+    return ReassessmentResponse(
+        available=True,
+        cycle=cycle,
+        latest_created_at=latest_row["created_at"],
+        latest_comparison=latest_comparison,
+    )
 
 
 @router.get("/{target_user_id}", response_model=ResultsResponse)
@@ -495,6 +614,9 @@ def get_results(
             )
             check_ins.latest_comparison = None
 
+    # Derive reassessment comparison (outside db session; tool opens its own session).
+    reassessment = _derive_reassessment(user_id)
+
     return ResultsResponse(
         user_id=user_id,
         current_phase=current_phase,
@@ -505,4 +627,5 @@ def get_results(
         development=development,
         graduation=graduation,
         check_ins=check_ins,
+        reassessment=reassessment,
     )
