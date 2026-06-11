@@ -524,3 +524,44 @@ class TestMakeUsage:
         meta = _make_usage(input_text="", output_text="")
         assert meta.prompt_token_count == 1
         assert meta.candidates_token_count == 1
+
+
+# ---------------------------------------------------------------------------
+# Shipped scenario files
+# ---------------------------------------------------------------------------
+
+_SCENARIOS_DIR = os.path.join(os.path.dirname(__file__), "harness", "scenarios")
+_SCENARIO_FILES = sorted(
+    f for f in os.listdir(_SCENARIOS_DIR) if f.endswith(".json")
+)
+
+
+class TestShippedScenarios:
+    """Every scenario file shipped under tests/harness/scenarios must load.
+
+    Parametrized over the directory listing so newly added scenario files
+    are covered automatically — a malformed shipped scenario fails CI
+    instead of failing server startup for whoever runs it.
+    """
+
+    def test_scenarios_exist(self):
+        assert _SCENARIO_FILES, "no scenario files found in tests/harness/scenarios"
+
+    @pytest.mark.parametrize("filename", _SCENARIO_FILES)
+    def test_shipped_scenario_loads(self, filename):
+        script = ScenarioScript.load(os.path.join(_SCENARIOS_DIR, filename))
+        assert isinstance(script, ScenarioScript)
+
+    @pytest.mark.parametrize("filename", _SCENARIO_FILES)
+    def test_shipped_scenario_agents_are_known(self, filename):
+        from agents.transmutation.mock_llm import _AGENT_TOOL_MARKERS, _ROOT_AGENT
+
+        with open(os.path.join(_SCENARIOS_DIR, filename), encoding="utf-8") as fh:
+            raw = json.load(fh)
+        known = set(_AGENT_TOOL_MARKERS.values()) | {_ROOT_AGENT}
+        scenario_agents = {k for k in raw if k != "default_say"}
+        unknown = scenario_agents - known
+        assert not unknown, (
+            f"{filename} scripts unknown agent(s) {sorted(unknown)} — "
+            f"steps for these would never be served (valid: {sorted(known)})"
+        )

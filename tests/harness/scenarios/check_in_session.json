@@ -1,0 +1,38 @@
+{
+  "default_say": "Good to see you again — whenever you're ready.",
+  "transmutation_engine": [
+    {
+      "say": "Welcome back for your check-in! Send me your user JSON (see the scenarios README) and I'll score this check-in against your graduation baseline."
+    },
+    {
+      "transfer": "check_in_agent"
+    }
+  ],
+  "check_in_agent": [
+    {
+      "call": "get_graduation_record",
+      "args": {},
+      "args_from": { "user_id": "user_message.user_id" }
+    },
+    {
+      "call": "generate_check_in_snapshot",
+      "args": {},
+      "args_from": { "user_id": "user_message.user_id" }
+    },
+    {
+      "call": "save_profile_snapshot",
+      "args": {
+        "interpretation": "Scripted harness check-in: scored against the graduation baseline via the mock model."
+      },
+      "args_from": { "user_id": "user_message.user_id" }
+    },
+    {
+      "call": "detect_check_in_regression",
+      "args": {},
+      "args_from": { "user_id": "user_message.user_id" }
+    },
+    {
+      "say": "Your check-in is scored and compared against your graduation baseline. Open the Reassessment tab on the right to see the regression panel — the verdict there comes from the deterministic engine, not from me."
+    }
+  ]
+}

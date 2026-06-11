@@ -1,0 +1,33 @@
+{
+  "default_say": "I'm here — keep going with your practices.",
+  "transmutation_engine": [
+    {
+      "say": "Welcome back! You're in the Development phase. Send me your user JSON (see the scenarios README) and I'll pull up your roadmap."
+    },
+    {
+      "transfer": "development_agent"
+    }
+  ],
+  "development_agent": [
+    {
+      "call": "get_development_roadmap",
+      "args": {},
+      "args_from": { "user_id": "user_message.user_id" }
+    },
+    {
+      "say": "Here's your active roadmap — your practices are listed in the Development tab on the right. To log a journal entry, send: {\"user_id\": \"<your id>\", \"reflection\": \"what you noticed\", \"self_rating\": 7}"
+    },
+    {
+      "call": "log_practice_entry",
+      "args": { "practice_id": "seed-practice-1" },
+      "args_from": {
+        "user_id": "user_message.user_id",
+        "reflection": "user_message.reflection",
+        "self_rating": "user_message.self_rating"
+      }
+    },
+    {
+      "say": "Logged it — that's real, consistent capacity-building. Watch the entry counter tick up in the Development tab. Each entry brings you closer to reassessment."
+    }
+  ]
+}
