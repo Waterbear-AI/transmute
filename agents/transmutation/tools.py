@@ -422,36 +422,79 @@ def _check_education_completion_gate(conn, user_id: str) -> Optional[dict]:
     return None
 
 
-def _check_development_completion_gate(conn, user_id: str) -> Optional[dict]:
-    """Check if development is complete enough to advance to reassessment.
+def get_development_gate_progress(conn, user_id: str) -> dict:
+    """Return structured gate-progress data for the development phase.
 
-    Gate: 10 practice entries OR 30 days elapsed since roadmap creation.
+    Single source of truth for both display (api/results.py) and enforcement
+    (_check_development_completion_gate).  Neither caller must re-derive gate
+    math — they consume this dict directly (ADR-1, FR-3).
+
+    Returns:
+        {
+            entries_logged: int,       # total practice_journal rows for user
+            entries_required: int,     # constant 10
+            days_elapsed: int | None,  # None when no roadmap row exists
+            days_required: int,        # constant 30
+            passed: bool,
+            via: "entries" | "time" | None,   # which path passed (entries first)
+        }
     """
-    # Check practice entry count
+    # --- entries ---
     count_row = conn.execute(
         "SELECT COUNT(*) as cnt FROM practice_journal WHERE user_id = ?",
         (user_id,),
     ).fetchone()
-    entry_count = count_row["cnt"] if count_row else 0
+    entries_logged = count_row["cnt"] if count_row else 0
 
-    if entry_count >= 10:
-        return None  # Gate passes
-
-    # Check days since roadmap creation
+    # --- days elapsed since FIRST roadmap (matches enforcement order in old gate) ---
     roadmap_row = conn.execute(
         "SELECT created_at FROM development_roadmap WHERE user_id = ? ORDER BY created_at ASC LIMIT 1",
         (user_id,),
     ).fetchone()
 
+    days_elapsed: Optional[int] = None
     if roadmap_row:
         created = datetime.fromisoformat(roadmap_row["created_at"])
         days_elapsed = (datetime.utcnow() - created).days
-        if days_elapsed >= 30:
-            return None  # Gate passes
+
+    # --- gate logic: entries checked first (precedence mirrors old enforcement) ---
+    if entries_logged >= 10:
+        passed = True
+        via: Optional[str] = "entries"
+    elif days_elapsed is not None and days_elapsed >= 30:
+        passed = True
+        via = "time"
+    else:
+        passed = False
+        via = None
 
     return {
-        "error": f"Development requires 10 practice entries or 30 days elapsed. Current: {entry_count} entries.",
-        "entries": entry_count,
+        "entries_logged": entries_logged,
+        "entries_required": 10,
+        "days_elapsed": days_elapsed,
+        "days_required": 30,
+        "passed": passed,
+        "via": via,
+    }
+
+
+def _check_development_completion_gate(conn, user_id: str) -> Optional[dict]:
+    """Check if development is complete enough to advance to reassessment.
+
+    Gate: 10 practice entries OR 30 days elapsed since roadmap creation.
+    Delegates to get_development_gate_progress so display and enforcement
+    cannot drift (ADR-1).
+    """
+    progress = get_development_gate_progress(conn, user_id)
+    if progress["passed"]:
+        return None  # Gate passes
+
+    return {
+        "error": (
+            f"Development requires 10 practice entries or 30 days elapsed. "
+            f"Current: {progress['entries_logged']} entries."
+        ),
+        "entries": progress["entries_logged"],
     }
 
 

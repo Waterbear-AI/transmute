@@ -22,6 +22,8 @@ from agents.transmutation.tools import (
     save_graduation_record,
     save_check_in_log,
     get_graduation_record,
+    get_development_gate_progress,
+    advance_phase,
 )
 
 
@@ -826,3 +828,172 @@ class TestCheckRoadmapTargetsGaps:
         result = check_roadmap_targets_gaps(uid, {"practices": practices})
         assert result["coverage_pct"] == 100.0
         assert len(result["uncovered_high_leverage"]) == 0
+
+
+# ── BE-001: get_development_gate_progress helper ──
+
+
+def _insert_roadmap(user_id: str, created_at: str = None) -> str:
+    """Insert a development_roadmap row for tests and return its id."""
+    rid = str(uuid.uuid4())
+    ts = created_at or datetime.utcnow().isoformat()
+    with get_db_session() as conn:
+        conn.execute(
+            "INSERT INTO development_roadmap (id, user_id, roadmap, created_at) VALUES (?, ?, ?, ?)",
+            (rid, user_id, json.dumps({"steps": []}), ts),
+        )
+    return rid
+
+
+def _insert_journal_entry(user_id: str, practice_id: str = "p1", self_rating: int = 5) -> str:
+    """Insert a practice_journal row and return its id."""
+    eid = str(uuid.uuid4())
+    with get_db_session() as conn:
+        conn.execute(
+            "INSERT INTO practice_journal (id, user_id, practice_id, reflection, self_rating, created_at) VALUES (?, ?, ?, ?, ?, ?)",
+            (eid, user_id, practice_id, "test reflection", self_rating, datetime.utcnow().isoformat()),
+        )
+    return eid
+
+
+class TestGetDevelopmentGateProgress:
+    """Unit tests for get_development_gate_progress (BE-001)."""
+
+    def test_returns_all_required_keys(self):
+        uid = _create_user(phase="development")
+        with get_db_session() as conn:
+            result = get_development_gate_progress(conn, uid)
+        assert set(result.keys()) == {
+            "entries_logged", "entries_required",
+            "days_elapsed", "days_required",
+            "passed", "via",
+        }
+
+    def test_no_roadmap_no_entries_returns_sensible_defaults(self):
+        uid = _create_user(phase="development")
+        with get_db_session() as conn:
+            result = get_development_gate_progress(conn, uid)
+        assert result["entries_logged"] == 0
+        assert result["entries_required"] == 10
+        assert result["days_elapsed"] is None
+        assert result["days_required"] == 30
+        assert result["passed"] is False
+        assert result["via"] is None
+
+    def test_entries_logged_counts_journal_rows(self):
+        uid = _create_user(phase="development")
+        for _ in range(3):
+            _insert_journal_entry(uid)
+        with get_db_session() as conn:
+            result = get_development_gate_progress(conn, uid)
+        assert result["entries_logged"] == 3
+
+    def test_days_elapsed_computed_from_first_roadmap(self):
+        uid = _create_user(phase="development")
+        old_ts = (datetime.utcnow() - timedelta(days=15)).isoformat()
+        _insert_roadmap(uid, created_at=old_ts)
+        # Insert a newer roadmap — elapsed should reflect the FIRST one
+        _insert_roadmap(uid, created_at=(datetime.utcnow() - timedelta(days=5)).isoformat())
+        with get_db_session() as conn:
+            result = get_development_gate_progress(conn, uid)
+        assert result["days_elapsed"] >= 15
+
+    def test_passed_via_entries_when_10_or_more(self):
+        uid = _create_user(phase="development")
+        for _ in range(10):
+            _insert_journal_entry(uid)
+        with get_db_session() as conn:
+            result = get_development_gate_progress(conn, uid)
+        assert result["passed"] is True
+        assert result["via"] == "entries"
+
+    def test_passed_via_time_when_30_days_elapsed(self):
+        uid = _create_user(phase="development")
+        old_ts = (datetime.utcnow() - timedelta(days=31)).isoformat()
+        _insert_roadmap(uid, created_at=old_ts)
+        _insert_journal_entry(uid)  # only 1 entry — time path
+        with get_db_session() as conn:
+            result = get_development_gate_progress(conn, uid)
+        assert result["passed"] is True
+        assert result["via"] == "time"
+
+    def test_entries_takes_precedence_over_time_when_both_met(self):
+        uid = _create_user(phase="development")
+        old_ts = (datetime.utcnow() - timedelta(days=35)).isoformat()
+        _insert_roadmap(uid, created_at=old_ts)
+        for _ in range(10):
+            _insert_journal_entry(uid)
+        with get_db_session() as conn:
+            result = get_development_gate_progress(conn, uid)
+        assert result["passed"] is True
+        assert result["via"] == "entries"
+
+    def test_not_passed_when_neither_threshold_met(self):
+        uid = _create_user(phase="development")
+        recent_ts = (datetime.utcnow() - timedelta(days=5)).isoformat()
+        _insert_roadmap(uid, created_at=recent_ts)
+        for _ in range(3):
+            _insert_journal_entry(uid)
+        with get_db_session() as conn:
+            result = get_development_gate_progress(conn, uid)
+        assert result["passed"] is False
+        assert result["via"] is None
+
+    def test_days_elapsed_none_when_no_roadmap(self):
+        uid = _create_user(phase="development")
+        # No roadmap row — days_elapsed must be None regardless of entries
+        for _ in range(5):
+            _insert_journal_entry(uid)
+        with get_db_session() as conn:
+            result = get_development_gate_progress(conn, uid)
+        assert result["days_elapsed"] is None
+
+
+class TestCheckDevelopmentCompletionGateRefactor:
+    """Integration tests verifying _check_development_completion_gate still works after refactor (BE-001)."""
+
+    def test_gate_passes_returns_none_at_10_entries(self):
+        uid = _create_user(phase="development")
+        for _ in range(10):
+            _insert_journal_entry(uid)
+        with get_db_session() as conn:
+            from agents.transmutation.tools import _check_development_completion_gate
+            result = _check_development_completion_gate(conn, uid)
+        assert result is None  # gate passes
+
+    def test_gate_passes_returns_none_at_30_days(self):
+        uid = _create_user(phase="development")
+        old_ts = (datetime.utcnow() - timedelta(days=31)).isoformat()
+        _insert_roadmap(uid, created_at=old_ts)
+        _insert_journal_entry(uid)
+        with get_db_session() as conn:
+            from agents.transmutation.tools import _check_development_completion_gate
+            result = _check_development_completion_gate(conn, uid)
+        assert result is None
+
+    def test_gate_fails_returns_error_dict(self):
+        uid = _create_user(phase="development")
+        _insert_roadmap(uid)  # fresh roadmap
+        _insert_journal_entry(uid)
+        with get_db_session() as conn:
+            from agents.transmutation.tools import _check_development_completion_gate
+            result = _check_development_completion_gate(conn, uid)
+        assert isinstance(result, dict)
+        assert "error" in result
+        assert "entries" in result
+        assert result["entries"] == 1
+
+    def test_advance_phase_blocked_before_gate(self):
+        uid = _create_user(phase="development")
+        _insert_roadmap(uid)
+        _insert_journal_entry(uid)
+        result = advance_phase(uid, "reassessment")
+        assert "error" in result
+
+    def test_advance_phase_allowed_after_entries_gate(self):
+        uid = _create_user(phase="development")
+        for _ in range(10):
+            _insert_journal_entry(uid)
+        result = advance_phase(uid, "reassessment")
+        # Should succeed (no error key, or success-like response)
+        assert "error" not in result
