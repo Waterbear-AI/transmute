@@ -642,6 +642,165 @@ class TestResultsAPIJourney:
         assert "latest_regression" in ci
         assert ci["latest_regression"] is False
 
+    # ── BE-002: Extended DevelopmentResponse contract tests ──────────────────
+
+    def test_development_practices_in_results(self, authenticated_client):
+        """GET /api/results returns practices list with 3 items and expected fields."""
+        uid = authenticated_client.user_id
+        with get_db_session() as conn:
+            conn.execute("UPDATE users SET current_phase = 'development' WHERE id = ?", (uid,))
+
+        roadmap = {
+            "practices": [
+                {"practice_id": "p1", "title": "Morning check", "dimension": "Emotional Awareness",
+                 "sub_dimension": "Emotion Recognition", "transmutation_operation": "filtering"},
+                {"practice_id": "p2", "title": "Body scan", "dimension": "Physical Awareness",
+                 "sub_dimension": None, "transmutation_operation": None},
+                {"practice_id": "p3", "title": "Values sit", "dimension": "Mindfulness",
+                 "sub_dimension": None, "transmutation_operation": "amplification"},
+            ]
+        }
+        save_roadmap(uid, roadmap)
+
+        resp = authenticated_client.get(f"/api/results/{uid}")
+        assert resp.status_code == 200
+        dev = resp.json()["development"]
+
+        assert dev["has_roadmap"] is True
+        practices = dev["practices"]
+        assert len(practices) == 3
+
+        p1 = next(p for p in practices if p["practice_id"] == "p1")
+        assert p1["title"] == "Morning check"
+        assert p1["dimension"] == "Emotional Awareness"
+        assert "entry_count" in p1
+        assert "last_self_rating" in p1
+        assert "last_entry_at" in p1
+
+    def test_development_gate_in_results(self, authenticated_client):
+        """/api/results gate dict matches get_development_gate_progress output."""
+        uid = authenticated_client.user_id
+        with get_db_session() as conn:
+            conn.execute("UPDATE users SET current_phase = 'development' WHERE id = ?", (uid,))
+
+        save_roadmap(uid, {"steps": []})
+        log_practice_entry(uid, "p1", "test", 5)
+
+        from agents.transmutation.tools import get_development_gate_progress
+        with get_db_session() as conn:
+            expected = get_development_gate_progress(conn, uid)
+
+        resp = authenticated_client.get(f"/api/results/{uid}")
+        assert resp.status_code == 200
+        gate = resp.json()["development"]["gate"]
+
+        assert gate["entries_logged"] == expected["entries_logged"]
+        assert gate["entries_required"] == expected["entries_required"]
+        assert gate["days_elapsed"] == expected["days_elapsed"]
+        assert gate["days_required"] == expected["days_required"]
+        assert gate["passed"] == expected["passed"]
+        assert gate["via"] == expected["via"]
+
+    def test_development_recent_entries_capped_at_20(self, authenticated_client):
+        """After 25 entries, recent_entries has 20 (newest first) and total_entries==25."""
+        uid = authenticated_client.user_id
+        with get_db_session() as conn:
+            conn.execute("UPDATE users SET current_phase = 'development' WHERE id = ?", (uid,))
+
+        for i in range(25):
+            log_practice_entry(uid, "p1", f"entry {i}", 5)
+
+        resp = authenticated_client.get(f"/api/results/{uid}")
+        assert resp.status_code == 200
+        dev = resp.json()["development"]
+
+        assert dev["total_entries"] == 25
+        assert len(dev["recent_entries"]) == 20
+        # Newest first: created_at descending
+        timestamps = [e["created_at"] for e in dev["recent_entries"]]
+        assert timestamps == sorted(timestamps, reverse=True)
+
+    def test_development_gate_passed_via_entries(self, authenticated_client):
+        """10+ entries → gate.passed=True, gate.via='entries'."""
+        uid = authenticated_client.user_id
+        with get_db_session() as conn:
+            conn.execute("UPDATE users SET current_phase = 'development' WHERE id = ?", (uid,))
+
+        for _ in range(10):
+            log_practice_entry(uid, "p1", "reflection", 7)
+
+        resp = authenticated_client.get(f"/api/results/{uid}")
+        gate = resp.json()["development"]["gate"]
+        assert gate["passed"] is True
+        assert gate["via"] == "entries"
+
+    def test_development_gate_passed_via_time(self, authenticated_client):
+        """2 entries + 31-day-old roadmap → gate.passed=True, gate.via='time'."""
+        uid = authenticated_client.user_id
+        with get_db_session() as conn:
+            conn.execute("UPDATE users SET current_phase = 'development' WHERE id = ?", (uid,))
+            old_ts = (datetime.utcnow() - timedelta(days=31)).isoformat()
+            conn.execute(
+                "INSERT INTO development_roadmap (id, user_id, roadmap, created_at) VALUES (?, ?, ?, ?)",
+                (str(uuid.uuid4()), uid, "{}", old_ts),
+            )
+
+        log_practice_entry(uid, "p1", "entry a", 6)
+        log_practice_entry(uid, "p1", "entry b", 6)
+
+        resp = authenticated_client.get(f"/api/results/{uid}")
+        gate = resp.json()["development"]["gate"]
+        assert gate["passed"] is True
+        assert gate["via"] == "time"
+        assert gate["days_elapsed"] >= 30
+
+    def test_development_no_roadmap_returns_empty_practices_and_null_days_elapsed(
+        self, authenticated_client
+    ):
+        """No roadmap → has_roadmap False, practices==[], gate.days_elapsed null."""
+        uid = authenticated_client.user_id
+        with get_db_session() as conn:
+            conn.execute("UPDATE users SET current_phase = 'development' WHERE id = ?", (uid,))
+
+        resp = authenticated_client.get(f"/api/results/{uid}")
+        assert resp.status_code == 200
+        dev = resp.json()["development"]
+
+        assert dev["has_roadmap"] is False
+        assert dev["practices"] == []
+        assert dev["gate"]["days_elapsed"] is None
+
+    def test_development_legacy_journal_null_dimension(self, authenticated_client):
+        """Journal rows with NULL dimension return dimension=None without validation error."""
+        uid = authenticated_client.user_id
+        with get_db_session() as conn:
+            conn.execute("UPDATE users SET current_phase = 'development' WHERE id = ?", (uid,))
+            # Insert a legacy row without dimension (pre-migration-007 shape)
+            conn.execute(
+                "INSERT INTO practice_journal (id, user_id, practice_id, reflection, self_rating, created_at) "
+                "VALUES (?, ?, ?, ?, ?, ?)",
+                (str(uuid.uuid4()), uid, "legacy-p", "old entry", 5,
+                 datetime.utcnow().isoformat()),
+            )
+
+        resp = authenticated_client.get(f"/api/results/{uid}")
+        assert resp.status_code == 200
+        entries = resp.json()["development"]["recent_entries"]
+        assert len(entries) == 1
+        assert entries[0]["dimension"] is None
+
+    def test_development_results_enforces_same_user_403(self, authenticated_client):
+        """GET /api/results/{other_uid} as authenticated user returns 403."""
+        # Create a different user directly in DB
+        other_uid = str(uuid.uuid4())
+        with get_db_session() as conn:
+            conn.execute(
+                "INSERT INTO users (id, name, email, password_hash, current_phase) VALUES (?, ?, ?, ?, ?)",
+                (other_uid, "Other", f"{other_uid}@test.com", "hash", "development"),
+            )
+        resp = authenticated_client.get(f"/api/results/{other_uid}")
+        assert resp.status_code == 403
+
 
 # ── Deterministic Sentinel Reassessment Journey ──────────────────────────────
 

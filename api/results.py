@@ -10,7 +10,11 @@ from typing import Any, Optional
 from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel
 
-from agents.transmutation.tools import detect_check_in_regression, generate_comparison_snapshot
+from agents.transmutation.tools import (
+    detect_check_in_regression,
+    generate_comparison_snapshot,
+    get_development_gate_progress,
+)
 from api.auth import get_current_user_id
 from db.database import get_db_session
 
@@ -47,11 +51,55 @@ class EducationProgressResponse(BaseModel):
     summary: Optional[dict[str, Any]] = None
 
 
+class RoadmapPracticeResponse(BaseModel):
+    """Structured practice from roadmap_practices (FR-1).
+
+    title falls back to practice_id when NULL (legacy rows or practices without
+    explicit titles).
+    """
+    practice_id: str
+    title: Optional[str] = None
+    dimension: str
+    sub_dimension: Optional[str] = None
+    transmutation_operation: Optional[str] = None
+    entry_count: int = 0
+    last_self_rating: Optional[int] = None
+    last_entry_at: Optional[str] = None
+
+
+class PracticeJournalEntryResponse(BaseModel):
+    """One practice_journal row (FR-2).  reflection is user-authored — never logged."""
+    practice_id: str
+    reflection: str
+    self_rating: int
+    dimension: Optional[str] = None   # NULL in legacy rows pre-migration-007
+    created_at: str
+
+
+class DevelopmentGateResponse(BaseModel):
+    """Mirrors get_development_gate_progress return dict exactly (FR-3, ADR-1).
+
+    via is a closed set: "entries" | "time" | None.
+    """
+    entries_logged: int
+    entries_required: int
+    days_elapsed: Optional[int] = None
+    days_required: int
+    passed: bool
+    via: Optional[str] = None   # "entries" | "time" | None
+
+
 class DevelopmentResponse(BaseModel):
+    # ── EXISTING fields (back-compat) ──────────────────────────────────────
     has_roadmap: bool
     roadmap: Optional[dict[str, Any]] = None
-    practice_count: int = 0
+    practice_count: int = 0           # kept: legacy consumers; equals total_entries
     roadmap_created_at: Optional[str] = None
+    # ── NEW fields (FR-1..FR-3) ────────────────────────────────────────────
+    total_entries: int = 0            # total practice_journal rows for user
+    practices: list[RoadmapPracticeResponse] = []
+    recent_entries: list[PracticeJournalEntryResponse] = []
+    gate: Optional[DevelopmentGateResponse] = None
 
 
 class GraduationResponse(BaseModel):
@@ -259,12 +307,99 @@ def get_results(
             "SELECT COUNT(*) as cnt FROM practice_journal WHERE user_id = ?",
             (user_id,),
         ).fetchone()
+        total_entries = practice_count_row["cnt"] if practice_count_row else 0
+
+        # ── B7.2 bounded queries (no N+1) ─────────────────────────────────
+
+        # Query 1: all roadmap_practices rows for user, insertion order
+        practice_rows = conn.execute(
+            """SELECT practice_id, title, dimension, sub_dimension, transmutation_operation
+               FROM roadmap_practices
+               WHERE user_id = ?
+               ORDER BY created_at""",
+            (user_id,),
+        ).fetchall()
+
+        # Query 2: per-practice entry counts + last_entry_at via GROUP BY
+        agg_rows = conn.execute(
+            """SELECT practice_id, COUNT(*) AS cnt, MAX(created_at) AS last_at
+               FROM practice_journal
+               WHERE user_id = ?
+               GROUP BY practice_id""",
+            (user_id,),
+        ).fetchall()
+        agg_by_pid: dict[str, dict] = {
+            r["practice_id"]: {"cnt": r["cnt"], "last_at": r["last_at"]}
+            for r in agg_rows
+        }
+
+        # Query 3: latest self_rating per practice via a single join
+        # Ties on identical timestamps resolved by taking any one row (ratings at
+        # the same instant are interchangeable for display per spec B7.2).
+        rating_rows = conn.execute(
+            """SELECT pj.practice_id, pj.self_rating
+               FROM practice_journal pj
+               JOIN (
+                   SELECT practice_id, MAX(created_at) AS m
+                   FROM practice_journal
+                   WHERE user_id = ?
+                   GROUP BY practice_id
+               ) lx ON pj.practice_id = lx.practice_id AND pj.created_at = lx.m
+               WHERE pj.user_id = ?""",
+            (user_id, user_id),
+        ).fetchall()
+        last_rating_by_pid: dict[str, int] = {
+            r["practice_id"]: r["self_rating"] for r in rating_rows
+        }
+
+        # Build practice list (safe defaults when no journal rows exist for a practice)
+        practices: list[RoadmapPracticeResponse] = [
+            RoadmapPracticeResponse(
+                practice_id=r["practice_id"],
+                title=r["title"],
+                dimension=r["dimension"],
+                sub_dimension=r["sub_dimension"],
+                transmutation_operation=r["transmutation_operation"],
+                entry_count=agg_by_pid.get(r["practice_id"], {}).get("cnt", 0),
+                last_self_rating=last_rating_by_pid.get(r["practice_id"]),
+                last_entry_at=agg_by_pid.get(r["practice_id"], {}).get("last_at"),
+            )
+            for r in practice_rows
+        ]
+
+        # Query 4: 20 most recent journal entries, newest first (ADR-2)
+        journal_rows = conn.execute(
+            """SELECT practice_id, reflection, self_rating, dimension, created_at
+               FROM practice_journal
+               WHERE user_id = ?
+               ORDER BY created_at DESC
+               LIMIT 20""",
+            (user_id,),
+        ).fetchall()
+        recent_entries: list[PracticeJournalEntryResponse] = [
+            PracticeJournalEntryResponse(
+                practice_id=r["practice_id"],
+                reflection=r["reflection"],
+                self_rating=r["self_rating"],
+                dimension=r["dimension"],
+                created_at=r["created_at"],
+            )
+            for r in journal_rows
+        ]
+
+        # Gate progress via shared helper (ADR-1 — same math as enforcement)
+        gate_dict = get_development_gate_progress(conn, user_id)
+        gate = DevelopmentGateResponse(**gate_dict)
 
         development = DevelopmentResponse(
             has_roadmap=roadmap_row is not None,
             roadmap=json.loads(roadmap_row["roadmap"]) if roadmap_row else None,
-            practice_count=practice_count_row["cnt"] if practice_count_row else 0,
+            practice_count=total_entries,
             roadmap_created_at=roadmap_row["created_at"] if roadmap_row else None,
+            total_entries=total_entries,
+            practices=practices,
+            recent_entries=recent_entries,
+            gate=gate,
         )
 
         # Get graduation record
