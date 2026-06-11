@@ -47,7 +47,11 @@ const Results = (() => {
             _resultsData.development_roadmap = d.development;
         }
         if (d.graduation && d.graduation.exists) _resultsData.graduation_data = d.graduation;
+        // Precedence: check-in data first, then reassessment overrides it (ADR-5).
+        // Reassessment wins because the backend only sets available=true when the
+        // latest snapshot is a reassessment — i.e. the most-recent lifecycle activity.
         if (d.check_ins && d.check_ins.count > 0) _resultsData.comparison_snapshots = d.check_ins;
+        if (d.reassessment && d.reassessment.available) _resultsData.comparison_snapshots = d.reassessment;
 
         // Also accept pre-mapped data from SSE (passthrough)
         if (d.assessment_state) _resultsData.assessment_state = d.assessment_state;
@@ -93,13 +97,23 @@ const Results = (() => {
                 _renderTabs();
                 _switchTab('profile');
                 // Re-fetch full results to get spider chart (binary data not sent via SSE)
+                // and to populate comparison_snapshots from results.reassessment when available (FR-4).
                 if (_userId) {
                     fetch('/api/results/' + encodeURIComponent(_userId))
                         .then(r => r.ok ? r.json() : null)
                         .then(results => {
-                            if (results && results.latest_profile) {
+                            if (!results) return;
+                            if (results.latest_profile) {
                                 _resultsData.profile_snapshots = results.latest_profile;
                                 if (_activeTab === 'profile') _renderTabContent('profile');
+                            }
+                            // FR-4: populate reassessment comparison data post-persistence.
+                            // The re-fetch runs after save_profile_snapshot persists the snapshot,
+                            // so results.reassessment now reflects the current reassessment correctly.
+                            if (results.reassessment && results.reassessment.available) {
+                                _resultsData.comparison_snapshots = results.reassessment;
+                                _renderTabs();
+                                if (_activeTab === 'reassessment') _renderTabContent('reassessment');
                             }
                         })
                         .catch(() => {});
@@ -225,6 +239,12 @@ const Results = (() => {
         // Assessment: visible when in assessment phase or has data
         if (tab.id === 'assessment') {
             return _currentPhase === 'assessment' || !!_resultsData.assessment_state;
+        }
+        // Reassessment: visible during the reassessment phase (even before any snapshot
+        // exists, so the empty state is reachable) OR when comparison data is present
+        // (post-graduation check-ins also land in comparison_snapshots — ADR-6, FR-10).
+        if (tab.id === 'reassessment') {
+            return _currentPhase === 'reassessment' || !!_resultsData.comparison_snapshots;
         }
         // Other tabs: visible when their data exists
         if (tab.dataKey) {
@@ -1068,10 +1088,30 @@ const Results = (() => {
 
     function _renderReassessment(el) {
         const data = _resultsData.comparison_snapshots;
-        if (!data) return;
 
+        // Empty state: visible during reassessment phase before any snapshot is saved,
+        // or when called with no data. Explains why the tab is empty and what to do next
+        // (frontend-ui-component-states; anti-patterns-happy-path-only).
+        if (!data) {
+            const emptyEl = document.createElement('div');
+            emptyEl.className = 'results-empty-state';
+            emptyEl.setAttribute('role', 'status');
+            Sanitize.setText(emptyEl,
+                'No reassessment yet — finish a development cycle and say ‘I’m ready’ in chat to run your first reassessment.'
+            );
+            el.appendChild(emptyEl);
+            return;
+        }
+
+        // Branch header: "Reassessment — Cycle N" for reassessment data;
+        // "Check-ins" for check-in data (FR-7).
         const header = document.createElement('h3');
-        Sanitize.setText(header, 'Reassessment / Check-in');
+        if (data.kind === 'reassessment') {
+            const cycleLabel = data.cycle != null ? ' — Cycle ' + data.cycle : '';
+            Sanitize.setText(header, 'Reassessment' + cycleLabel);
+        } else {
+            Sanitize.setText(header, 'Check-ins');
+        }
         el.appendChild(header);
 
         // If this is check-in data (from API response)
