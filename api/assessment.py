@@ -17,7 +17,7 @@ from api.auth import get_current_user_id
 from db.database import get_db_session
 from rate_limit import limiter
 from agents.transmutation.question_bank import get_question_bank
-from agents.transmutation.tools import _compute_progress
+from agents.transmutation.tools import _compute_progress, RESPONSE_SAVE_PHASES
 
 logger = logging.getLogger(__name__)
 
@@ -148,16 +148,22 @@ def save_responses_batch(
 # --- Helpers ---
 
 def _validate_assessment_phase(conn, user_id: str) -> None:
-    """Ensure user is in assessment phase."""
+    """Ensure user is in a phase that allows saving Likert responses.
+
+    Accepts assessment, reassessment, and check_in phases (RESPONSE_SAVE_PHASES).
+    Raises 403 Forbidden for any other phase so callers cannot bypass the gate
+    by manipulating their phase state (anti-patterns-error-swallowing: explicit
+    rejection, not silent pass-through).
+    """
     row = conn.execute(
         "SELECT current_phase FROM users WHERE id = ?", (user_id,)
     ).fetchone()
     if not row:
         raise HTTPException(status_code=404, detail="User not found")
-    if row["current_phase"] != "assessment":
+    if row["current_phase"] not in RESPONSE_SAVE_PHASES:
         raise HTTPException(
-            status_code=409,
-            detail=f"Cannot save responses in phase: {row['current_phase']}",
+            status_code=403,
+            detail="Forbidden",
         )
 
 

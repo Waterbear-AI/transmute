@@ -99,8 +99,8 @@ class TestAssessmentAPI:
             "question_id": "ea_rec_01",
             "score": 4,
         })
-        # User is in orientation phase, should fail
-        assert resp.status_code == 409
+        # User is in orientation phase — not in RESPONSE_SAVE_PHASES, so 403 Forbidden.
+        assert resp.status_code == 403
 
     def test_save_response_in_assessment_phase(self, authenticated_client):
         """Advance user to assessment phase, then save a response."""

@@ -178,7 +178,8 @@ class TestAssessmentResponseJourney:
             "question_id": qid,
             "score": 3,
         })
-        assert resp.status_code == 409
+        # orientation is not in RESPONSE_SAVE_PHASES, so 403 Forbidden.
+        assert resp.status_code == 403
 
     def test_unauthenticated_assessment_access_denied(self, api_client):
         resp = api_client.get("/api/assessment/state")

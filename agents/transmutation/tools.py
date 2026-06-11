@@ -97,6 +97,11 @@ ARCHETYPE_RANK = {
 # consumer in sync — never re-type the literal "check_in" at call sites.
 SNAPSHOT_KIND_CHECK_IN = "check_in"
 
+# Phases that allow saving Likert assessment responses.
+# Used by both save_assessment_response (tools) and _validate_assessment_phase (api)
+# to guarantee a single source of truth for phase guard logic.
+RESPONSE_SAVE_PHASES = {"assessment", "reassessment", "check_in"}
+
 
 def _snapshot_archetype(placement: dict) -> str:
     """Read the archetype from a stored quadrant_placement dict.
@@ -672,7 +677,7 @@ def save_assessment_response(
         ).fetchone()
         if not user_row:
             return {"error": "User not found"}
-        if user_row["current_phase"] != "assessment":
+        if user_row["current_phase"] not in RESPONSE_SAVE_PHASES:
             return {"error": f"Cannot save responses in phase: {user_row['current_phase']}"}
 
         # Get or create assessment state
