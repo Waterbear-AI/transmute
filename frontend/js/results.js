@@ -41,7 +41,11 @@ const Results = (() => {
         if (d.assessment && d.assessment.exists) _resultsData.assessment_state = d.assessment;
         if (d.latest_profile) _resultsData.profile_snapshots = d.latest_profile;
         if (d.education && d.education.exists) _resultsData.education_progress = d.education;
-        if (d.development && d.development.has_roadmap) _resultsData.development_roadmap = d.development;
+        // B6.4: assign development data when has_roadmap OR user is in development phase,
+        // so the FR-10 "no roadmap" empty state can render for active development users.
+        if (d.development && (d.development.has_roadmap || currentPhase === 'development')) {
+            _resultsData.development_roadmap = d.development;
+        }
         if (d.graduation && d.graduation.exists) _resultsData.graduation_data = d.graduation;
         if (d.check_ins && d.check_ins.count > 0) _resultsData.comparison_snapshots = d.check_ins;
 
@@ -119,9 +123,24 @@ const Results = (() => {
 
             case 'development.roadmap':
             case 'development.practice':
-                _resultsData.development_roadmap = data;
-                if (_activeTab === 'development') _renderTabContent('development');
+                // ADR-4: the tool payload shape (total_entries, saved, …) does NOT match the
+                // API shape (practices, gate, recent_entries …). Stuffing the raw payload
+                // silently zeroes every new field. Refetch the full results instead —
+                // same pattern as profile.snapshot (results.js:91-102).
                 _renderTabs();
+                if (_userId) {
+                    fetch('/api/results/' + encodeURIComponent(_userId))
+                        .then(function(r) { return r.ok ? r.json() : null; })
+                        .then(function(results) {
+                            if (results && results.development &&
+                                (results.development.has_roadmap || _currentPhase === 'development')) {
+                                _resultsData.development_roadmap = results.development;
+                                if (_activeTab === 'development') _renderTabContent('development');
+                                _renderTabs();
+                            }
+                        })
+                        .catch(function() {}); // keep last-known-good data on failure
+                }
                 break;
 
             case 'graduation.readiness':
@@ -826,54 +845,225 @@ const Results = (() => {
         }
     }
 
+    // ── Development tab helpers ──────────────────────────────────────────────
+
+    /**
+     * Render the dual-path gate progress block (FR-6) with optional ready banner (FR-7).
+     */
+    function _renderDevGate(el, data) {
+        const gate = data.gate || null;
+        const entriesLogged = (gate && gate.entries_logged != null) ? gate.entries_logged : (data.practice_count || 0);
+        const entriesRequired = (gate && gate.entries_required) || 10;
+        const daysElapsed = gate ? gate.days_elapsed : null;
+        const daysRequired = (gate && gate.days_required) || 30;
+
+        const section = document.createElement('div');
+        section.className = 'dev-gate-block';
+
+        const gateHeader = document.createElement('h4');
+        gateHeader.style.marginBottom = '8px';
+        Sanitize.setText(gateHeader, 'Progress to reassessment');
+        section.appendChild(gateHeader);
+
+        // Entries bar
+        const entriesLabel = document.createElement('div');
+        entriesLabel.style.marginBottom = '4px';
+        Sanitize.setText(entriesLabel, 'Practice entries: ' + entriesLogged + ' / ' + entriesRequired);
+        section.appendChild(entriesLabel);
+        section.appendChild(_createProgressBar(Math.min(entriesLogged / entriesRequired, 1)));
+
+        // Days bar (only when a roadmap / days_elapsed is available)
+        if (daysElapsed !== null && daysElapsed !== undefined) {
+            const daysLabel = document.createElement('div');
+            daysLabel.style.marginTop = '8px';
+            daysLabel.style.marginBottom = '4px';
+            Sanitize.setText(daysLabel, 'or ' + daysElapsed + ' / ' + daysRequired + ' days elapsed');
+            section.appendChild(daysLabel);
+            section.appendChild(_createProgressBar(Math.min(daysElapsed / daysRequired, 1)));
+        }
+
+        // Ready-for-reassessment banner (FR-7): only when gate passed AND still in development phase
+        if (gate && gate.passed && _currentPhase === 'development') {
+            const banner = document.createElement('div');
+            banner.className = 'ready-banner';
+            banner.setAttribute('role', 'status');
+            const bannerText = document.createElement('p');
+            Sanitize.setText(bannerText, '✓ Ready for reassessment — say “I’m ready” in chat to begin.');
+            banner.appendChild(bannerText);
+            section.appendChild(banner);
+        }
+
+        el.appendChild(section);
+    }
+
+    /**
+     * Render structured practice cards (FR-4).
+     * Falls back to legacy roadmap.steps ordered list when practices is empty (spec B6.4).
+     */
+    function _renderDevPractices(el, data) {
+        const practices = data.practices || [];
+        const roadmap = data.roadmap || null;
+
+        const section = document.createElement('div');
+        section.className = 'dev-practices-section';
+
+        // Roadmap header row with creation date
+        const rmRow = document.createElement('div');
+        rmRow.style.display = 'flex';
+        rmRow.style.justifyContent = 'space-between';
+        rmRow.style.alignItems = 'baseline';
+        rmRow.style.marginBottom = '8px';
+
+        const rmHeader = document.createElement('h4');
+        rmHeader.style.margin = '0';
+        Sanitize.setText(rmHeader, 'Current Roadmap');
+        rmRow.appendChild(rmHeader);
+
+        if (data.roadmap_created_at) {
+            const dateEl = document.createElement('div');
+            dateEl.style.color = 'var(--color-text-muted)';
+            dateEl.style.fontSize = '13px';
+            Sanitize.setText(dateEl, 'Created: ' + new Date(data.roadmap_created_at).toLocaleDateString());
+            rmRow.appendChild(dateEl);
+        }
+        section.appendChild(rmRow);
+
+        if (practices.length > 0) {
+            // Structured practice cards (new path)
+            for (var i = 0; i < practices.length; i++) {
+                var p = practices[i];
+                var card = document.createElement('div');
+                card.className = 'practice-card';
+
+                var titleEl = document.createElement('h5');
+                Sanitize.setText(titleEl, p.title || p.practice_id);
+                card.appendChild(titleEl);
+
+                var metaEl = document.createElement('div');
+                metaEl.className = 'practice-card__meta';
+                var metaParts = [p.dimension];
+                if (p.transmutation_operation) metaParts.push(p.transmutation_operation);
+                Sanitize.setText(metaEl, metaParts.join(' · '));
+                card.appendChild(metaEl);
+
+                var statsEl = document.createElement('div');
+                statsEl.className = 'practice-card__stats';
+                var statParts = [p.entry_count + ' ' + (p.entry_count === 1 ? 'entry' : 'entries')];
+                if (p.last_self_rating != null) statParts.push('last rating ' + p.last_self_rating + '/10');
+                if (p.last_entry_at) {
+                    statParts.push(new Date(p.last_entry_at).toLocaleDateString(undefined, { month: 'short', day: 'numeric' }));
+                }
+                Sanitize.setText(statsEl, statParts.join(' · '));
+                card.appendChild(statsEl);
+
+                section.appendChild(card);
+            }
+        } else if (roadmap) {
+            // Legacy fallback: render roadmap.steps ordered list when no structured practices
+            var steps = roadmap.steps || roadmap;
+            if (Array.isArray(steps)) {
+                var ol = document.createElement('ol');
+                ol.style.paddingLeft = '20px';
+                for (var j = 0; j < steps.length; j++) {
+                    var step = steps[j];
+                    var li = document.createElement('li');
+                    li.style.margin = '8px 0';
+                    li.style.lineHeight = '1.5';
+                    var text = typeof step === 'string' ? step : (step.title || step.description || JSON.stringify(step));
+                    Sanitize.setText(li, text);
+                    ol.appendChild(li);
+                }
+                section.appendChild(ol);
+            }
+        }
+
+        el.appendChild(section);
+    }
+
+    /**
+     * Render the recent journal entries list (FR-5).
+     * reflection is user-authored — all text via Sanitize.setText (never innerHTML).
+     */
+    function _renderDevJournal(el, data) {
+        var entries = data.recent_entries || [];
+        var totalEntries = data.total_entries != null ? data.total_entries : (data.practice_count || 0);
+
+        var section = document.createElement('div');
+        section.className = 'dev-journal-section';
+
+        var jHeader = document.createElement('h4');
+        var headerText = 'Recent journal entries';
+        if (entries.length > 0) {
+            headerText += ' (' + entries.length + ' of ' + totalEntries + ')';
+        }
+        Sanitize.setText(jHeader, headerText);
+        section.appendChild(jHeader);
+
+        if (entries.length === 0) {
+            var emptyEl = document.createElement('p');
+            emptyEl.style.color = 'var(--color-text-muted)';
+            emptyEl.style.marginTop = '8px';
+            Sanitize.setText(emptyEl, 'No journal entries yet — tell me in chat how a practice went to log your first.');
+            section.appendChild(emptyEl);
+        } else {
+            var ul = document.createElement('ul');
+            ul.className = 'journal-list';
+            ul.setAttribute('aria-label', 'Recent journal entries');
+
+            for (var k = 0; k < entries.length; k++) {
+                var entry = entries[k];
+                var li = document.createElement('li');
+                li.className = 'journal-entry';
+
+                var entryMeta = document.createElement('div');
+                entryMeta.className = 'journal-entry__meta';
+                var metaParts = [];
+                if (entry.created_at) {
+                    metaParts.push(new Date(entry.created_at).toLocaleDateString(undefined, { month: 'short', day: 'numeric' }));
+                }
+                if (entry.self_rating != null) metaParts.push(entry.self_rating + '/10');
+                if (entry.dimension) metaParts.push(entry.dimension);
+                Sanitize.setText(entryMeta, metaParts.join(' · '));
+                li.appendChild(entryMeta);
+
+                var entryText = document.createElement('p');
+                entryText.className = 'journal-entry__reflection';
+                Sanitize.setText(entryText, entry.reflection || '');
+                li.appendChild(entryText);
+
+                ul.appendChild(li);
+            }
+            section.appendChild(ul);
+        }
+
+        el.appendChild(section);
+    }
+
     function _renderDevelopment(el) {
         const data = _resultsData.development_roadmap;
-        if (!data) return;
 
         const header = document.createElement('h3');
         Sanitize.setText(header, 'Development');
         el.appendChild(header);
 
-        // Practice count
-        const practiceCount = data.practice_count || 0;
-        const countEl = document.createElement('div');
-        countEl.style.margin = '12px 0';
-        Sanitize.setText(countEl, 'Practice entries: ' + practiceCount + ' / 10');
-        el.appendChild(countEl);
-        el.appendChild(_createProgressBar(Math.min(practiceCount / 10, 1)));
-
-        // Roadmap
-        const roadmap = data.roadmap;
-        if (roadmap) {
-            const rmHeader = document.createElement('h4');
-            rmHeader.style.marginTop = '16px';
-            Sanitize.setText(rmHeader, 'Current Roadmap');
-            el.appendChild(rmHeader);
-
-            if (data.roadmap_created_at) {
-                const dateEl = document.createElement('div');
-                dateEl.style.color = 'var(--color-text-muted)';
-                dateEl.style.fontSize = '13px';
-                dateEl.style.marginBottom = '8px';
-                Sanitize.setText(dateEl, 'Created: ' + new Date(data.roadmap_created_at).toLocaleDateString());
-                el.appendChild(dateEl);
-            }
-
-            const steps = roadmap.steps || roadmap;
-            if (Array.isArray(steps)) {
-                const ol = document.createElement('ol');
-                ol.style.paddingLeft = '20px';
-                for (const step of steps) {
-                    const li = document.createElement('li');
-                    li.style.margin = '8px 0';
-                    li.style.lineHeight = '1.5';
-                    const text = typeof step === 'string' ? step : (step.title || step.description || JSON.stringify(step));
-                    Sanitize.setText(li, text);
-                    ol.appendChild(li);
-                }
-                el.appendChild(ol);
-            }
+        // No-roadmap empty state (FR-10)
+        if (!data || !data.has_roadmap) {
+            const emptyEl = document.createElement('p');
+            emptyEl.style.color = 'var(--color-text-muted)';
+            emptyEl.style.marginTop = '12px';
+            Sanitize.setText(emptyEl, 'No roadmap yet — ask in chat and we’ll build one together.');
+            el.appendChild(emptyEl);
+            return;
         }
+
+        // Gate block (FR-6, FR-7)
+        _renderDevGate(el, data);
+
+        // Practice cards / legacy fallback (FR-4)
+        _renderDevPractices(el, data);
+
+        // Journal list (FR-5)
+        _renderDevJournal(el, data);
     }
 
     function _renderReassessment(el) {
@@ -1229,11 +1419,16 @@ const Results = (() => {
     }
 
     function _createProgressBar(fraction) {
+        const pct = Math.round(Math.min(Math.max(fraction * 100, 0), 100));
         const bar = document.createElement('div');
         bar.className = 'progress-bar';
+        bar.setAttribute('role', 'progressbar');
+        bar.setAttribute('aria-valuemin', '0');
+        bar.setAttribute('aria-valuemax', '100');
+        bar.setAttribute('aria-valuenow', String(pct));
         const fill = document.createElement('div');
         fill.className = 'progress-bar__fill';
-        fill.style.width = Math.min(Math.max(fraction * 100, 0), 100) + '%';
+        fill.style.width = pct + '%';
         bar.appendChild(fill);
         return bar;
     }

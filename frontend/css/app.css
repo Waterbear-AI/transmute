@@ -1025,6 +1025,78 @@ body {
     transition: width 0.3s ease;
 }
 
+/* ── Development tab components ────────────────────────────────── */
+
+/* Practice card — one card per roadmap practice (FR-4) */
+.practice-card {
+    background: var(--color-surface);
+    border: 1px solid var(--color-border);
+    border-left: 3px solid var(--phase-development);
+    border-radius: 6px;
+    padding: 10px 12px;
+    margin: 8px 0;
+}
+
+.practice-card h5 {
+    margin: 0 0 4px 0;
+    font-size: 14px;
+    font-weight: 600;
+}
+
+.practice-card__meta {
+    color: var(--color-text-muted);
+    font-size: 13px;
+    margin-bottom: 4px;
+}
+
+.practice-card__stats {
+    color: var(--color-text-muted);
+    font-size: 12px;
+}
+
+/* Journal entry row — one per recent_entries item (FR-5) */
+.journal-list {
+    list-style: none;
+    padding: 0;
+    margin: 8px 0 0 0;
+}
+
+.journal-entry {
+    background: var(--color-surface);
+    border: 1px solid var(--color-border);
+    border-radius: 6px;
+    padding: 10px 12px;
+    margin: 6px 0;
+}
+
+.journal-entry__meta {
+    color: var(--color-text-muted);
+    font-size: 12px;
+    margin-bottom: 4px;
+}
+
+.journal-entry__reflection {
+    margin: 0;
+    font-size: 14px;
+    line-height: 1.5;
+}
+
+/* Ready-for-reassessment banner (FR-7) */
+.ready-banner {
+    background: var(--color-surface);
+    border: 1px solid var(--color-success);
+    border-radius: 6px;
+    padding: 10px 14px;
+    margin-top: 10px;
+    color: var(--color-success);
+}
+
+.ready-banner p {
+    margin: 0;
+    font-size: 14px;
+    line-height: 1.5;
+}
+
 /* ── Utility ────────────────────────────────── */
 
 [hidden] {
