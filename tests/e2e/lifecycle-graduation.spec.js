@@ -93,6 +93,8 @@ test.describe('Lifecycle graduation gate — UI (TEST-001)', () => {
         await expect(page.locator('#app')).toBeVisible();
 
         // Simulate checkin.complete SSE (used by reassessment comparison render)
+        // Then trigger handlePhaseTransition so the tab switches to the comparison view.
+        // This is the same two-step pattern used in ui-journeys.spec.js.
         await page.evaluate(() => {
             if (typeof Results !== 'undefined') {
                 Results.handleSSEEvent('checkin.complete', {
@@ -104,6 +106,7 @@ test.describe('Lifecycle graduation gate — UI (TEST-001)', () => {
                     },
                     quadrant_shift: { shifted: true, from: 'Absorber', to: 'Transmuter' },
                 });
+                Results.handlePhaseTransition('assessment', 'reassessment');
             }
         });
 
@@ -217,7 +220,7 @@ test.describe('Lifecycle graduation gate — UI (TEST-001)', () => {
         registerJsErrorListener(page);
         await loadApp(page);
 
-        // Fire comparison SSE
+        // Fire comparison SSE then trigger phase transition (same two-step as lc-01)
         await page.evaluate(() => {
             if (typeof Results !== 'undefined') {
                 Results.handleSSEEvent('checkin.complete', {
@@ -228,6 +231,7 @@ test.describe('Lifecycle graduation gate — UI (TEST-001)', () => {
                     },
                     quadrant_shift: { shifted: false, from: 'Absorber', to: 'Absorber' },
                 });
+                Results.handlePhaseTransition('assessment', 'reassessment');
             }
         });
 
@@ -255,6 +259,7 @@ test.describe('Lifecycle graduation gate — UI (TEST-001)', () => {
                     },
                     quadrant_shift: { shifted: true, from: 'Magnifier', to: 'Transmuter' },
                 });
+                Results.handlePhaseTransition('assessment', 'reassessment');
             }
         });
 
