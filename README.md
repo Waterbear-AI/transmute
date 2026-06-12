@@ -10,7 +10,7 @@ The Transmutation Engine is the open-source reference implementation of **[trans
 It runs locally. You bring your own LLM key. Your data stays in a single SQLite file on your machine.
 
 <p align="center">
-  <img src="quadrant-chart-rendered.png" alt="The transmutarian quadrant chart placing a user among five archetypes" width="520">
+  <img src="docs/quadrant.svg" alt="The transmutarian quadrant: five archetypes mapped on how you handle harm (filter vs amplify) and good (absorb vs emit)" width="620">
 </p>
 
 ---
@@ -233,7 +233,6 @@ Released under the **[MIT License](LICENSE)** — free and open source, **free f
 ## Links
 
 - 🌐 **Framework & mission:** [transmutarianism.org](https://transmutarianism.org/)
-- 🏗️ **Built by:** [Waterbear AI](https://github.com/Waterbear-AI)
-- 📖 **Design docs:** [`docs/plans/`](docs/plans/)
+- 🏗️ **Built by:** [Waterbear AI](https://waterbearai.com/)
 
 <p align="center"><em>The work of holding people up has always been real. Now it's measurable.</em></p>

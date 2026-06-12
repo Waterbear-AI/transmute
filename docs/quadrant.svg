@@ -1,0 +1,59 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 760 540" width="760" height="540" font-family="'Segoe UI', Roboto, Helvetica, Arial, sans-serif" role="img" aria-label="The transmutarian quadrant: five archetypes mapped on how you handle harm (filter vs amplify) and good (absorb vs emit)">
+  <defs>
+    <marker id="arrow" markerWidth="9" markerHeight="9" refX="6" refY="3" orient="auto" markerUnits="strokeWidth">
+      <path d="M0,0 L6,3 L0,6 Z" fill="#2C5F9E"/>
+    </marker>
+  </defs>
+
+  <!-- card -->
+  <rect x="6" y="6" width="748" height="528" rx="16" fill="#FAFBFD" stroke="#D0D8E8" stroke-width="1.5"/>
+
+  <!-- title -->
+  <text x="32" y="46" font-size="14" font-weight="700" letter-spacing="2.5" fill="#7A8AA0">THE TRANSMUTARIAN QUADRANT</text>
+
+  <!-- quadrant tints -->
+  <rect x="180" y="110" width="200" height="180" fill="#E9F1FB"/>
+  <rect x="380" y="110" width="200" height="180" fill="#E8F5EC"/>
+  <rect x="180" y="290" width="200" height="180" fill="#F7EAEA"/>
+  <rect x="380" y="290" width="200" height="180" fill="#FCF2E2"/>
+  <rect x="180" y="110" width="400" height="360" fill="none" stroke="#D0D8E8" stroke-width="1.5"/>
+
+  <!-- axes -->
+  <line x1="158" y1="290" x2="602" y2="290" stroke="#2C5F9E" stroke-width="2" marker-start="url(#arrow)" marker-end="url(#arrow)"/>
+  <line x1="380" y1="88" x2="380" y2="492" stroke="#2C5F9E" stroke-width="2" marker-start="url(#arrow)" marker-end="url(#arrow)"/>
+
+  <!-- axis end labels -->
+  <text x="380" y="80" text-anchor="middle" font-size="11" font-weight="600" letter-spacing="1.5" fill="#5A6B82">FILTERS HARM</text>
+  <text x="380" y="510" text-anchor="middle" font-size="11" font-weight="600" letter-spacing="1.5" fill="#5A6B82">AMPLIFIES HARM</text>
+  <text x="92" y="287" text-anchor="middle" font-size="11" font-weight="600" letter-spacing="1.5" fill="#5A6B82">ABSORBS</text>
+  <text x="92" y="302" text-anchor="middle" font-size="11" font-weight="600" letter-spacing="1.5" fill="#5A6B82">GOOD</text>
+  <text x="668" y="287" text-anchor="middle" font-size="11" font-weight="600" letter-spacing="1.5" fill="#5A6B82">EMITS</text>
+  <text x="668" y="302" text-anchor="middle" font-size="11" font-weight="600" letter-spacing="1.5" fill="#5A6B82">GOOD</text>
+
+  <!-- Absorber (top-left, +F -A) -->
+  <circle cx="270" cy="170" r="6.5" fill="#2C5F9E"/>
+  <text x="280" y="205" text-anchor="middle" font-size="17" font-weight="700" fill="#243B57">Absorber</text>
+  <text x="280" y="225" text-anchor="middle" font-size="11.5" font-weight="600" fill="#5A6B82">+F · −A</text>
+
+  <!-- Transmuter (top-right, +F +A) -->
+  <circle cx="490" cy="170" r="6.5" fill="#2E9E5B"/>
+  <text x="480" y="205" text-anchor="middle" font-size="17" font-weight="700" fill="#1F3D2B">Transmuter</text>
+  <text x="480" y="225" text-anchor="middle" font-size="11.5" font-weight="600" fill="#5A6B82">+F · +A</text>
+
+  <!-- Extractor (bottom-left, -F -A) -->
+  <text x="280" y="360" text-anchor="middle" font-size="17" font-weight="700" fill="#6B2F2C">Extractor</text>
+  <text x="280" y="380" text-anchor="middle" font-size="11.5" font-weight="600" fill="#5A6B82">−F · −A</text>
+  <circle cx="270" cy="408" r="6.5" fill="#B5524E"/>
+
+  <!-- Magnifier (bottom-right, -F +A) -->
+  <text x="480" y="360" text-anchor="middle" font-size="17" font-weight="700" fill="#7A4A14">Magnifier</text>
+  <text x="480" y="380" text-anchor="middle" font-size="11.5" font-weight="600" fill="#5A6B82">−F · +A</text>
+  <circle cx="490" cy="408" r="6.5" fill="#D98A2B"/>
+
+  <!-- Conduit (center, neutral) -->
+  <rect x="335" y="276" width="90" height="28" rx="14" fill="#ECEFF4" stroke="#C7D0DE" stroke-width="1.25"/>
+  <text x="380" y="294" text-anchor="middle" font-size="12.5" font-weight="700" fill="#4A5568">Conduit</text>
+
+  <!-- caption -->
+  <text x="380" y="532" text-anchor="middle" font-size="11" fill="#9AA7B8">F = filters deprivation · A = amplifies fulfillment — your pattern can differ at each Maslow level</text>
+</svg>
