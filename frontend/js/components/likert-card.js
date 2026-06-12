@@ -70,6 +70,16 @@ const LikertCard = (() => {
 
         const isComplete = () => answeredSet.size === totalQuestions;
 
+        // Fire batch_complete to the agent at most once. Initialised to true when
+        // the batch renders already complete (history / prefilled), so editing a
+        // past answer re-saves (upsert) without re-signalling completion.
+        let batchNotified = isComplete();
+        const notifyBatchCompleteOnce = () => {
+            if (batchNotified) return;
+            batchNotified = true;
+            _notifyBatchComplete(data.batch_id);
+        };
+
         const updateProgress = () => {
             const count = answeredSet.size;
             Sanitize.setText(counterEl, count + ' / ' + totalQuestions + ' answered');
@@ -93,7 +103,7 @@ const LikertCard = (() => {
 
         for (const q of data.questions) {
             const prefilled = answers[q.id] || null;
-            const questionEl = _createQuestion(q, data.batch_id, answeredSet, totalQuestions, () => {
+            const questionEl = _createQuestion(q, notifyBatchCompleteOnce, answeredSet, totalQuestions, () => {
                 updateProgress();
                 // Auto-collapse the whole batch the moment the last answer lands.
                 if (isComplete()) {
@@ -112,7 +122,7 @@ const LikertCard = (() => {
         return card;
     }
 
-    function _createQuestion(question, batchId, answeredSet, totalQuestions, onAnswer, prefilled) {
+    function _createQuestion(question, onBatchComplete, answeredSet, totalQuestions, onAnswer, prefilled) {
         const container = document.createElement('div');
         container.className = 'likert-question';
 
@@ -162,17 +172,15 @@ const LikertCard = (() => {
                     checkEl.hidden = false;
                     answeredSet.add(question.id);
 
-                    // Disable all options for this question
-                    scale.querySelectorAll('.likert-option').forEach(b => {
-                        b.disabled = true;
-                    });
+                    // Options stay enabled so the user can correct a mis-click —
+                    // re-clicking another option re-saves (the API upserts).
 
                     // Update batch progress (also handles auto-collapse when done)
                     onAnswer();
 
-                    // Check batch completion
+                    // Check batch completion (signals the agent at most once)
                     if (answeredSet.size === totalQuestions) {
-                        _notifyBatchComplete(batchId);
+                        onBatchComplete();
                     }
                 }
             });
@@ -209,7 +217,6 @@ const LikertCard = (() => {
             if (selectedIdx >= 0 && selectedIdx < buttons.length) {
                 buttons[selectedIdx].classList.add('likert-option--selected');
                 buttons[selectedIdx].setAttribute('aria-checked', 'true');
-                buttons.forEach(b => { b.disabled = true; });
                 checkEl.hidden = false;
             }
         }

@@ -60,13 +60,12 @@ const ScenarioCard = (() => {
             btn.addEventListener('click', async () => {
                 if (btn.disabled) return;
 
-                // Select this choice
-                btn.classList.add('scenario-choice--selected');
-
-                // Disable all choices
+                // Select this choice (re-selectable: clear any prior selection so
+                // the user can correct a mis-click). The API upserts the response.
                 choicesEl.querySelectorAll('.scenario-choice').forEach(b => {
-                    b.disabled = true;
+                    b.classList.remove('scenario-choice--selected');
                 });
+                btn.classList.add('scenario-choice--selected');
 
                 // POST to API
                 try {
