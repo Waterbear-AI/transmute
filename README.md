@@ -1,0 +1,239 @@
+# The Transmutation Engine
+
+**A conversational AI that helps you see — and grow — the invisible relational work you do every day: the harm you filter out, and the good you pass on.**
+
+> _Economies measure throughput. They do not measure **transmutation**._
+> — [transmutarianism.org](https://transmutarianism.org/)
+
+The Transmutation Engine is the open-source reference implementation of **[transmutarianism](https://transmutarianism.org/)** — a framework for measuring the relational work that conventional metrics ignore: care, harm, safety, and dignity flowing between people. It's a warm, guided, chat-based assessment that maps how you handle the suffering and the joy that move through your life, then coaches you toward becoming someone who **breaks cycles of harm and creates more good than they receive**.
+
+It runs locally. You bring your own LLM key. Your data stays in a single SQLite file on your machine.
+
+<p align="center">
+  <img src="quadrant-chart-rendered.png" alt="The transmutarian quadrant chart placing a user among five archetypes" width="520">
+</p>
+
+---
+
+## Why this exists
+
+The people who quietly hold the world together rarely show up in any ledger. The abuse survivor who raises their kids with tenderness instead of repeating the pattern. The coworker who absorbs a room's panic so others can think. The neighbor who makes a place feel safe. This is real, demanding work — and economics renders it invisible.
+
+Transmutarianism gives that work a vocabulary and a measure. The Transmutation Engine turns the framework into something you can actually *do*: a personal assessment that meets you where you are, reflects your patterns back without judgment, teaches you the model through your own data, and helps you practice change over time.
+
+It is **not** therapy, and it doesn't pretend to be. It's a mirror with a map.
+
+---
+
+## The model in 60 seconds
+
+Two kinds of "flow" move between people:
+
+| Flow | Symbol | What it is |
+|------|--------|------------|
+| **Fulfillment** | D+ | Joy, care, support, flourishing — needs being met |
+| **Deprivation** | D− | Suffering, harm, neglect, trauma — needs going unmet |
+
+You do two things with those flows — and how you do them defines your pattern:
+
+- **Filtering (F)** — reducing deprivation by *absorbing more harm than you emit*. Positive F means you break cycles.
+- **Amplification (A)** — generating fulfillment by *emitting more good than you absorb*. Positive A means you create more than you take.
+
+Plot those on two axes — *how you handle harm* (Filter ↔ Amplify) and *how you handle good* (Absorb ↔ Emit) — and you land in one of **five archetypes**:
+
+| Archetype | Pattern | In plain terms |
+|-----------|---------|----------------|
+| 🌟 **Transmuter** | +F, +A | Filters harm **and** amplifies good. Breaks cycles, creates flourishing. |
+| 🛡️ **Absorber** | +F, −A | Takes on others' pain, but keeps joy private. |
+| 📣 **Magnifier** | −F, +A | High energy — spreads everything, harm and good alike. |
+| 🪣 **Extractor** | −F, −A | Passes harm along, keeps the good for themselves. |
+| ➡️ **Conduit** | F≈0, A≈0 | Passes things through unchanged — the neutral baseline. |
+
+These are **operating patterns, not identities**. You might be a Transmuter with your friends and an Absorber at work — at different [Maslow](https://en.wikipedia.org/wiki/Maslow%27s_hierarchy_of_needs) need levels. The assessment measures all of it across **13 dimensions** (10 awareness prerequisites + 3 transmutarian capacity dimensions).
+
+---
+
+## How the experience works
+
+The Engine guides you through a complete lifecycle as a single, continuous conversation. A results panel beside the chat updates live as you go.
+
+```
+orientation → assessment → profile → education → development → reassessment → graduation → check-in
+```
+
+| Phase | What happens |
+|-------|--------------|
+| **Orientation** | A warm welcome and one grounding question: *what brought you here?* |
+| **Assessment** | Likert questions and real-world scenarios profile your awareness and flows. |
+| **Profile** | Your responses are scored and you meet your archetype — on the quadrant chart above, alongside a radar chart of all 13 dimensions. |
+| **Education** | The Engine teaches you the model *through your own results*, with comprehension checks. |
+| **Development** | Personalized practices, a journal, and a roadmap for growth. |
+| **Reassessment** | Targeted re-measurement to see what's shifted, gated on genuine readiness. |
+| **Graduation** | A closing sequence and a profile snapshot artifact to keep. |
+| **Check-in** | Come back anytime to re-measure and reflect. |
+
+Scoring is **deterministic** (pure functions in [`scoring_engine.py`](agents/transmutation/scoring_engine.py) — no AI in the math). The LLM's job is to *interpret, teach, and coach* — never to invent your numbers.
+
+### Built-in safety, by design
+
+Conversations about harm and need can surface real distress. The Engine runs a three-tier mental-health safety protocol with a strict **no-shame** posture. On any signal of crisis it stops the assessment, surfaces the **988 Suicide & Crisis Lifeline** and **Crisis Text Line**, and logs the concern — it never tries to play therapist. See [`prompts/shared/safety.py`](agents/transmutation/prompts/shared/safety.py).
+
+---
+
+## Quickstart
+
+You'll need an API key for one LLM provider (Anthropic, OpenAI, AWS Bedrock, or a local Ollama model).
+
+### Option A — Docker (recommended)
+
+```bash
+git clone https://github.com/Waterbear-AI/transmute.git
+cd transmute
+
+cp .env.example .env          # then add your provider's API key
+make docker-up                # builds and starts the stack
+```
+
+Open **http://localhost:54718**. Register a local account and start talking.
+
+### Option B — Local Python
+
+```bash
+python3 -m venv .venv && source .venv/bin/activate
+pip install -r requirements.txt
+
+cp .env.example .env          # add your API key
+python main.py                # serves on http://localhost:54718
+```
+
+The SQLite database and schema are created automatically on first launch.
+
+### Configuration
+
+Model choice lives in [`config.yaml`](config.yaml); secrets live in `.env`. To switch providers, set the `provider`, `model_id`, and `api_key_env` fields:
+
+```yaml
+model:
+  provider: anthropic                    # anthropic | openai | bedrock | ollama
+  model_id: claude-sonnet-4-5-20250514
+  api_key_env: ANTHROPIC_API_KEY         # name of the env var holding your key
+```
+
+Token usage and cost are tracked per call against the `model_costs` table in the same file, so you always know what a session cost.
+
+---
+
+## Architecture
+
+A FastAPI monolith with a clean separation between the deterministic core, the agent layer, and a dependency-free frontend.
+
+```
+┌─────────────────────────────────────────────────────────────┐
+│  Frontend  (vanilla JS, no build step)                       │
+│  chat window  +  live results panel  +  quadrant chart        │
+└───────────────┬─────────────────────────────────────────────┘
+                │  REST + Server-Sent Events (streaming)
+┌───────────────▼─────────────────────────────────────────────┐
+│  FastAPI  (main.py)                                          │
+│  auth · chat · assessment · results · sessions · usage · export│
+└───────────────┬───────────────────────────┬─────────────────┘
+                │                           │
+┌───────────────▼──────────────┐  ┌─────────▼──────────────────┐
+│  Agent layer  (Google ADK)   │  │  Deterministic core         │
+│  root orchestrator routes to │  │  scoring_engine · flow_engine│
+│  7 sub-agents by phase       │  │  question_bank · sentinel    │
+│  + LiteLLM provider adapter  │  │  pure functions, fully tested│
+└───────────────┬──────────────┘  └─────────┬──────────────────┘
+                └──────────────┬─────────────┘
+                ┌──────────────▼──────────────┐
+                │  SQLite  (single-file DB)    │
+                │  versioned SQL migrations    │
+                └──────────────────────────────┘
+```
+
+**Stack:** Python 3.13 · [FastAPI](https://fastapi.tiangolo.com/) · [Google ADK](https://github.com/google/adk-python) agents · [LiteLLM](https://github.com/BerriAI/litellm) (multi-provider) · Pydantic · SQLite · matplotlib (server-rendered dimension radar charts) · vanilla JS frontend with a client-side `<canvas>` quadrant chart (no framework, no bundler).
+
+**Design notes worth knowing:**
+
+- **The scoring is pure.** `scoring_engine.py` and `flow_engine.py` take responses in and return scores out — no database, no network, no AI. That's what makes the math auditable and the tests fast.
+- **One root agent, seven specialists.** The [root orchestrator](agents/transmutation/agent.py) handles orientation itself and transfers to a sub-agent per phase using ADK's built-in agent transfer.
+- **Provider-agnostic.** Swap Anthropic for OpenAI, Bedrock, or a local Ollama model by editing one YAML block — the LiteLLM adapter handles the rest.
+- **Built to port.** The entire `agents/` directory is designed to lift cleanly into a larger multi-tenant platform later; only the auth and storage layers would be swapped.
+
+### Project layout
+
+```
+transmute/
+├── main.py                  # FastAPI app + router wiring + DB migrations on boot
+├── config.yaml / config.py  # model provider, costs, transmutation constants
+├── agents/transmutation/    # the agent — portable, self-contained
+│   ├── agent.py             #   root orchestrator
+│   ├── sub_agents/          #   assessment, profile, education, development, …
+│   ├── prompts/             #   phase prompts + shared safety/concepts
+│   ├── scoring_engine.py    #   deterministic scoring  ← no AI
+│   ├── flow_engine.py       #   fulfillment/deprivation flow math
+│   └── question_bank.py     #   assessment questions & scenarios
+├── api/                     # FastAPI routers (auth, chat, assessment, results…)
+├── db/                      # SQLite access + versioned migrations
+├── models/                  # Pydantic domain models
+├── frontend/                # chat UI + results panel (no build step)
+└── tests/                   # unit, integration, and Playwright e2e
+```
+
+---
+
+## Development
+
+The project ships a **cost-free test harness**: a scripted mock LLM lets you exercise the entire stack — including end-to-end Playwright runs — without spending a cent on real model calls.
+
+```bash
+# Fast-forward a fresh user to any phase with production-shaped data
+make seed PHASE=development EMAIL=dev@example.com
+
+# Run the server against a scripted mock scenario (no real LLM calls)
+make mock-run TRANSMUTE_MOCK_SCENARIO=tests/harness/scenarios/education_session.json
+
+# Full end-to-end harness: seed → mock server → Playwright → teardown
+make test-harness TRANSMUTE_MOCK_SCENARIO=tests/harness/scenarios/education_session.json
+```
+
+```bash
+pytest                       # Python unit + integration suite
+cd tests/e2e && npx playwright test   # browser end-to-end suite
+```
+
+CI runs the unit, integration, and end-to-end suites on every pull request to `main` (see [`.github/workflows/e2e-tests.yml`](.github/workflows/e2e-tests.yml)).
+
+---
+
+## Roadmap & status
+
+This is an early, actively developed MVP. The assessment, scoring, profile, education, and development phases are working end-to-end; the reassessment → graduation → check-in lifecycle loop is the current focus. Designed from day one to run on a local network so a small group — a family, a team, a research cohort — can each have their own private session.
+
+---
+
+## Contributing
+
+Contributions are welcome — whether that's code, assessment scenarios, prompt refinements, or framework critique. A good first step:
+
+1. Read the design docs in [`docs/plans/`](docs/plans/) to understand the architecture and intent.
+2. Open an issue describing what you'd like to change or add.
+3. Keep the deterministic core deterministic — scoring changes need tests.
+
+Please be mindful that this project deals with sensitive emotional material. The **no-shame**, safety-first posture is non-negotiable in any user-facing change.
+
+---
+
+## License
+
+Released under the **[MIT License](LICENSE)** — free and open source, **free forever**, which is a core goal of the project (see [`docs/plans/transmute-standalone-mvp.md`](docs/plans/transmute-standalone-mvp.md)). Use it, fork it, build on it.
+
+---
+
+## Links
+
+- 🌐 **Framework & mission:** [transmutarianism.org](https://transmutarianism.org/)
+- 🏗️ **Built by:** [Waterbear AI](https://github.com/Waterbear-AI)
+- 📖 **Design docs:** [`docs/plans/`](docs/plans/)
+
+<p align="center"><em>The work of holding people up has always been real. Now it's measurable.</em></p>
