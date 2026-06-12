@@ -1,2 +1,0 @@
-[     159ms] [ERROR] Failed to load resource: the server responded with a status of 401 (Unauthorized) @ http://localhost:54718/auth/me:0
-[   30780ms] [ERROR] Failed to load resource: the server responded with a status of 401 (Unauthorized) @ http://localhost:54718/auth/me:0
