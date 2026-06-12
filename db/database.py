@@ -11,11 +11,27 @@ MIGRATIONS_DIR = Path(__file__).parent / "migrations"
 
 
 def _get_db_path() -> str:
-    return get_settings().db_path
+    # Expand ~ so paths like "~/.transmute/transmute.db" resolve to the user's
+    # home regardless of the process's working directory.
+    return str(Path(get_settings().db_path).expanduser())
+
+
+def _ensure_db_dir(path: str) -> None:
+    """Create the database file's parent directory if it is missing.
+
+    Lets the server re-initialize from a clean slate: deleting the DB file — or
+    its whole directory — and restarting yields a freshly migrated DB (the
+    lifespan runs run_migrations on startup), instead of sqlite failing with
+    "unable to open database file". A mkdir failure (e.g. a permissions issue)
+    propagates rather than being swallowed.
+    """
+    Path(path).parent.mkdir(parents=True, exist_ok=True)
 
 
 def get_connection() -> sqlite3.Connection:
-    conn = sqlite3.connect(_get_db_path())
+    path = _get_db_path()
+    _ensure_db_dir(path)
+    conn = sqlite3.connect(path)
     conn.row_factory = sqlite3.Row
     conn.execute("PRAGMA journal_mode=WAL")
     conn.execute("PRAGMA foreign_keys=ON")
@@ -79,7 +95,8 @@ def _strip_sql_comments(sql: str) -> str:
 
 
 def run_migrations(db_path: str | None = None) -> int:
-    path = db_path or _get_db_path()
+    path = str(Path(db_path).expanduser()) if db_path else _get_db_path()
+    _ensure_db_dir(path)
     conn = sqlite3.connect(path)
     conn.row_factory = sqlite3.Row
     conn.execute("PRAGMA foreign_keys=ON")
