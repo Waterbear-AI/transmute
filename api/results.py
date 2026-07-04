@@ -44,6 +44,10 @@ class AssessmentSummary(BaseModel):
     scenarios_completed: int = 0
     scenarios_total: int = 0
     current_phase: Optional[str] = None
+    assessment_tier: Optional[str] = None
+    flagged_dimensions: Optional[list[str]] = None
+    deep_dive_dimensions: Optional[list[str]] = None
+    early_result: Optional[dict[str, Any]] = None
 
 
 class EducationProgressResponse(BaseModel):
@@ -322,7 +326,9 @@ def get_results(
 
         # Get assessment state
         assessment_row = conn.execute(
-            "SELECT responses, scenario_responses, current_phase FROM assessment_state WHERE user_id = ? ORDER BY created_at DESC LIMIT 1",
+            "SELECT responses, scenario_responses, current_phase, assessment_tier, "
+            "flagged_dimensions, deep_dive_dimensions, early_result "
+            "FROM assessment_state WHERE user_id = ? ORDER BY created_at DESC LIMIT 1",
             (user_id,),
         ).fetchone()
 
@@ -331,6 +337,9 @@ def get_results(
             scenario_responses = json.loads(assessment_row["scenario_responses"] or "{}")
             from agents.transmutation.question_bank import get_question_bank
             qb = get_question_bank()
+            flagged_dims = assessment_row["flagged_dimensions"]
+            deep_dive_dims = assessment_row["deep_dive_dimensions"]
+            early_result = assessment_row["early_result"]
             assessment = AssessmentSummary(
                 exists=True,
                 answered=len(responses),
@@ -338,6 +347,10 @@ def get_results(
                 scenarios_completed=len(scenario_responses),
                 scenarios_total=len(qb.get_all_scenarios()),
                 current_phase=assessment_row["current_phase"],
+                assessment_tier=assessment_row["assessment_tier"],
+                flagged_dimensions=json.loads(flagged_dims) if flagged_dims else None,
+                deep_dive_dimensions=json.loads(deep_dive_dims) if deep_dive_dims else None,
+                early_result=json.loads(early_result) if early_result else None,
             )
         else:
             assessment = AssessmentSummary(exists=False)

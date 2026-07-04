@@ -302,6 +302,7 @@ const Chat = (() => {
                 break;
 
             case 'assessment.progress':
+            case 'assessment.transmute_result':
             case 'profile.snapshot':
             case 'education.progress':
             case 'development.roadmap':

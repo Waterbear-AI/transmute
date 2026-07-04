@@ -82,9 +82,29 @@ const Results = (() => {
         switch (eventType) {
             case 'assessment.progress':
                 // SSE data shape: { progress: { answered, total, dimension_progress } }
-                _resultsData.assessment_state = data.progress || data;
+                // Preserve any early_result already stored (e.g. from a prior
+                // assessment.transmute_result event) — this event only refreshes
+                // progress-bar fields, and both events can arrive within the same tier.
+                _resultsData.assessment_state = Object.assign(
+                    {}, data.progress || data,
+                    { early_result: (_resultsData.assessment_state && _resultsData.assessment_state.early_result) || null }
+                );
                 if (_activeTab === 'assessment') _renderTabContent('assessment');
                 // Ensure tab is visible
+                _renderTabs();
+                break;
+
+            case 'assessment.transmute_result':
+                // Tier-1 completion fires this once, mid-conversation. Merge into
+                // the existing assessment_state (do not clobber answered/total/
+                // dimension_progress) so the early-result card and the progress
+                // bars can coexist and _renderAssessment can redraw both from
+                // stored state alone — required for it to survive tab switches
+                // (B6.2) without depending on event-arrival order.
+                _resultsData.assessment_state = Object.assign(
+                    {}, _resultsData.assessment_state, { early_result: data }
+                );
+                if (_activeTab === 'assessment') _renderTabContent('assessment');
                 _renderTabs();
                 break;
 
@@ -326,6 +346,20 @@ const Results = (() => {
         Sanitize.setText(header, 'Assessment Progress');
         el.appendChild(header);
 
+        // Tier affordance — always server-authoritative (assessment_tier column);
+        // this component only displays it, never computes/advances it client-side.
+        if (typeof TierProgress !== 'undefined') {
+            el.appendChild(TierProgress.create(data && data.assessment_tier));
+        }
+
+        // Early transmute result — rendered from stored state (not directly from
+        // the event) so it survives tab switches and page reloads alike (B6.2):
+        // the same data.early_result key is populated by the assessment.transmute_result
+        // SSE handler above AND by a GET /api/results fetch on initial load.
+        if (data && data.early_result && typeof renderEarlyResult === 'function') {
+            renderEarlyResult(el, data.early_result);
+        }
+
         const answered = (data && data.answered) || 0;
         const total = (data && data.total) || 200;
 
@@ -388,6 +422,86 @@ const Results = (() => {
             Sanitize.setText(hint, 'Answer questions in the chat to see your progress here.');
             el.appendChild(hint);
         }
+    }
+
+    /**
+     * Build a short description for an early (Tier-1-only) transmute result.
+     * Deliberately does NOT reuse _buildTransmuteDescription's sub-dimension
+     * sentence — Tier 1 has no per-dimension scores yet (only x/y/archetype),
+     * so that sentence would either be wrong or require threading a "have
+     * scores" flag through a function whose only other caller (the real
+     * Profile tab) always has them. A small dedicated description avoids
+     * that risk entirely (spec.md B6.1 explicitly allows this alternative).
+     */
+    function _buildEarlyResultDescription(shim) {
+        const name = _archetypeName(shim);
+        const key = _archetypeKey(shim);
+        const meaning = (key && ARCHETYPE_DESCRIPTIONS[key]) || DEFAULT_ARCHETYPE_DESC;
+        if (name) {
+            return 'Early read: your pattern is leaning ' + name + ' — ' + meaning;
+        }
+        return 'Early read: ' + meaning.charAt(0).toUpperCase() + meaning.slice(1);
+    }
+
+    /**
+     * Render the Tier-1 early transmute result card from a stored
+     * assessment.transmute_result payload: { archetype, x, y, confidence,
+     * confidence_reason }. Called both from the SSE handler (live) and from
+     * _renderAssessment reading _resultsData.assessment_state.early_result
+     * (post tab-switch / page-reload) — the two call sites always pass the
+     * identical raw event/API shape, so there is exactly one code path that
+     * interprets it.
+     *
+     * Builds a "shim" ({quadrant_placement: {archetype, x, y, confidence}})
+     * matching the real profile snapshot's shape so QuadrantChart.render and
+     * the _archetypeName/_archetypeKey helpers (written for full snapshots)
+     * work unmodified against this partial Tier-1 payload too — see
+     * spec.md B6.1.
+     */
+    function renderEarlyResult(el, earlyResult) {
+        if (!earlyResult) return;
+
+        const shim = {
+            quadrant_placement: {
+                archetype: earlyResult.archetype,
+                x: earlyResult.x,
+                y: earlyResult.y,
+                confidence: earlyResult.confidence
+            }
+        };
+
+        const card = document.createElement('div');
+        card.className = 'early-result-card';
+        card.id = 'early-transmute-result';
+        // Announce the archetype + description to screen readers when the card
+        // first appears (mid-conversation, SSE-driven) — matches the
+        // role="status" + aria-live="polite" pattern used by the regression
+        // panel elsewhere in this file. The nested ConfidenceBand has its own
+        // role="status" for the confidence badge specifically; this outer
+        // region covers the archetype title + description text too.
+        card.setAttribute('role', 'status');
+        card.setAttribute('aria-live', 'polite');
+
+        const title = document.createElement('h4');
+        Sanitize.setText(title, 'Your Early Transmute Read');
+        card.appendChild(title);
+
+        if (typeof ConfidenceBand !== 'undefined') {
+            card.appendChild(ConfidenceBand.create(earlyResult.confidence, earlyResult.confidence_reason));
+        }
+
+        const desc = document.createElement('p');
+        desc.className = 'early-result-card__desc';
+        Sanitize.setText(desc, _buildEarlyResultDescription(shim));
+        card.appendChild(desc);
+
+        const chartContainer = document.createElement('div');
+        card.appendChild(chartContainer);
+        if (typeof QuadrantChart !== 'undefined') {
+            QuadrantChart.render(chartContainer, shim.quadrant_placement, null);
+        }
+
+        el.appendChild(card);
     }
 
     function _renderProfile(el) {
@@ -1476,6 +1590,7 @@ const Results = (() => {
     return {
         update,
         handlePhaseTransition,
-        handleSSEEvent
+        handleSSEEvent,
+        renderEarlyResult
     };
 })();
