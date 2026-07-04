@@ -55,6 +55,10 @@ class AssessmentProgressResponse(BaseModel):
     completed_dimensions: Optional[list[str]] = None
     current_phase: Optional[str] = None
     progress: Optional[dict[str, Any]] = None
+    assessment_tier: Optional[str] = None
+    flagged_dimensions: Optional[list[str]] = None
+    deep_dive_dimensions: Optional[list[str]] = None
+    early_result: Optional[dict[str, Any]] = None
 
 
 # --- Endpoints ---

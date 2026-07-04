@@ -10,6 +10,7 @@ from agents.transmutation.scoring_engine import (
     score_responses,
     normalize_score,
     score_question_subset,
+    compute_early_transmute_result,
     _calculate_quadrant,
 )
 from agents.transmutation.spider_chart import generate_spider_chart
@@ -18,6 +19,8 @@ from agents.transmutation.leverage_engine import (
     validate_practice_linkage,
     TRANSMUTATION_OPERATIONS,
 )
+from agents.transmutation.adaptive_engine import select_next_awareness_items
+from config import get_settings
 
 logger = logging.getLogger(__name__)
 
@@ -121,7 +124,9 @@ def get_assessment_state(user_id: str) -> dict[str, Any]:
     """Retrieve current assessment progress for a user.
 
     Returns progress including which questions are answered, remaining count,
-    and per-dimension completion percentages.
+    per-dimension completion percentages, and the current assessment_tier so
+    the LLM can branch its tier-driven flow (transmute_core ->
+    awareness_core -> awareness_deepdive -> complete).
     """
     with get_db_session() as conn:
         row = conn.execute(
@@ -133,18 +138,29 @@ def get_assessment_state(user_id: str) -> dict[str, Any]:
         return {
             "exists": False,
             "current_phase": "assessment",
+            "assessment_tier": "transmute_core",
+            "flagged_dimensions": None,
+            "deep_dive_dimensions": None,
+            "early_result": None,
             "progress": _compute_progress({}, {}),
         }
 
     responses = json.loads(row["responses"] or "{}")
     scenario_responses = json.loads(row["scenario_responses"] or "{}")
     completed_dims = json.loads(row["completed_dimensions"] or "[]")
+    flagged_dims = json.loads(row["flagged_dimensions"]) if row["flagged_dimensions"] else None
+    deep_dive_dims = json.loads(row["deep_dive_dimensions"]) if row["deep_dive_dimensions"] else None
+    early_result = json.loads(row["early_result"]) if row["early_result"] else None
 
     # Return summary only — full responses stay in the DB to keep context small
     return {
         "exists": True,
         "completed_dimensions": completed_dims,
         "current_phase": row["current_phase"],
+        "assessment_tier": row["assessment_tier"],
+        "flagged_dimensions": flagged_dims,
+        "deep_dive_dimensions": deep_dive_dims,
+        "early_result": early_result,
         "progress": _compute_progress(responses, scenario_responses),
     }
 
@@ -325,31 +341,34 @@ def advance_phase(user_id: str, new_phase: str, reason: str = "") -> dict[str, A
 
 
 def _check_assessment_completion_gate(conn, user_id: str) -> Optional[dict]:
-    """Check if assessment is complete enough to advance to profile."""
+    """Check if assessment is complete enough to advance to profile.
+
+    NEW per-tier gate (replaces the old per-dimension >=60%-answered check):
+    the tiered flow is complete only once assessment_tier == "complete",
+    meaning Tier 1 (transmute_core) produced an early result AND every
+    Tier-2 item AND every Tier-3 screener/flagged-expansion item is
+    answered (assessment_tier is advanced to "complete" by
+    get_next_adaptive_batch once adaptive_engine reports nothing left to
+    offer for awareness_deepdive). The tier is server-authoritative -- it is
+    never read from client input, only from the assessment_state row.
+    """
     row = conn.execute(
-        "SELECT responses FROM assessment_state WHERE user_id = ? ORDER BY created_at DESC LIMIT 1",
+        "SELECT assessment_tier FROM assessment_state WHERE user_id = ? ORDER BY created_at DESC LIMIT 1",
         (user_id,),
     ).fetchone()
 
     if not row:
         return {"error": "No assessment data found"}
 
-    responses = json.loads(row["responses"] or "{}")
-    qb = get_question_bank()
-
-    for dim in qb.get_dimensions():
-        dim_questions = qb.get_questions_by_dimension(dim)
-        total = len(dim_questions)
-        answered = sum(1 for q in dim_questions if q["id"] in responses)
-        pct = answered / total if total > 0 else 0
-
-        if pct < 0.6:
-            return {
-                "error": f"Dimension '{dim}' has only {pct:.0%} answered (minimum 60% required)",
-                "dimension": dim,
-                "answered": answered,
-                "total": total,
-            }
+    if row["assessment_tier"] != "complete":
+        return {
+            "error": (
+                f"Assessment is not yet complete (current tier: "
+                f"{row['assessment_tier']!r}). Finish the awareness "
+                "assessment before advancing to profile."
+            ),
+            "assessment_tier": row["assessment_tier"],
+        }
 
     return None
 
@@ -808,6 +827,195 @@ def save_scenario_response(
         "scenario_id": scenario_id,
         "progress": progress,
     }
+
+
+def _get_assessment_state_row(conn, user_id: str):
+    """Fetch the current assessment_state row (or None). Single source of
+    truth for the "latest state for this user" query used by every tier tool
+    below, so a future column addition only needs updating in one SELECT."""
+    return conn.execute(
+        "SELECT * FROM assessment_state WHERE user_id = ? ORDER BY created_at DESC LIMIT 1",
+        (user_id,),
+    ).fetchone()
+
+
+def present_transmute_core_batch(user_id: str) -> dict[str, Any]:
+    """Present the next unanswered Tier-1 (transmute_core) item(s).
+
+    Drives Tier-1 via the existing assessment.question_batch (TC Likert
+    items, via present_question_batch) and assessment.scenario (SJT, via
+    present_scenario) event dicts -- this tool does not reinvent either
+    presentation format, only decides WHAT to present next for Tier 1.
+
+    Presents all unanswered TC Likert items in one batch (there are only 8
+    total), then one scenario at a time (scenarios use free-text follow-up
+    prompts better suited to one-at-a-time pacing). Once both are exhausted,
+    returns a status-only dict signaling the caller should call
+    evaluate_transmute_core_complete next.
+    """
+    qb = get_question_bank()
+
+    with get_db_session() as conn:
+        row = _get_assessment_state_row(conn, user_id)
+
+    responses = json.loads(row["responses"] or "{}") if row else {}
+    scenario_responses = json.loads(row["scenario_responses"] or "{}") if row else {}
+
+    tc_items = qb.get_questions_by_tier("transmute_core")
+    unanswered_tc = [q["id"] for q in tc_items if q["id"] not in responses]
+    if unanswered_tc:
+        return present_question_batch(user_id, unanswered_tc)
+
+    all_scenarios = qb.get_all_scenarios()
+    unanswered_scenarios = [s for s in all_scenarios if s["id"] not in scenario_responses]
+    if unanswered_scenarios:
+        return present_scenario(user_id, unanswered_scenarios[0]["id"])
+
+    return {
+        "status": "success",
+        "tier": "transmute_core",
+        "done": True,
+        "_agent_summary": (
+            "All Transmute Core items and scenarios are answered. "
+            "Call evaluate_transmute_core_complete next."
+        ),
+    }
+
+
+def evaluate_transmute_core_complete(user_id: str) -> dict[str, Any]:
+    """Check whether Tier 1 (transmute_core) has enough data to produce an
+    early transmute result, and if so, compute + persist it and advance the
+    tier.
+
+    Sufficiency: >= MIN_ITEMS_PER_DIM Transmutation Capacity items answered
+    AND >= MIN_SCENARIOS scenarios answered (both from
+    TransmutationSettings). When sufficient: computes
+    compute_early_transmute_result, persists early_result and advances
+    assessment_tier to "awareness_core" in the SAME transaction as the read
+    (backend-transaction-management: tier-advance + early_result persist
+    atomically with the triggering evaluation -- no window where one is
+    written without the other). Returns the assessment.transmute_result
+    event dict (event_type is what api/chat.py's existing re-emit path keys
+    on). When insufficient: returns {complete: False} and touches NOTHING --
+    tier and early_result are left exactly as they were (anti-patterns-
+    happy-path-only: the "not enough data yet" path is a first-class return,
+    not an exception).
+    """
+    settings = get_settings().transmutation
+
+    with get_db_session() as conn:
+        row = _get_assessment_state_row(conn, user_id)
+        if not row:
+            return {"status": "error", "message": "No assessment data found"}
+
+        responses = json.loads(row["responses"] or "{}")
+        scenario_responses = json.loads(row["scenario_responses"] or "{}")
+
+        qb = get_question_bank()
+        tc_items = qb.get_questions_by_tier("transmute_core")
+        tc_answered = sum(
+            1 for q in tc_items
+            if q["id"] in responses and responses[q["id"]].get("score") is not None
+        )
+        scenarios_answered = len(scenario_responses)
+
+        if tc_answered < settings.MIN_ITEMS_PER_DIM or scenarios_answered < settings.MIN_SCENARIOS:
+            return {
+                "status": "success",
+                "complete": False,
+                "tc_answered": tc_answered,
+                "scenarios_answered": scenarios_answered,
+                "_agent_summary": (
+                    f"Not enough Tier-1 data yet ({tc_answered} TC items, "
+                    f"{scenarios_answered} scenarios answered). Keep presenting "
+                    "Tier-1 items via present_transmute_core_batch."
+                ),
+            }
+
+        early_result = compute_early_transmute_result(responses, scenario_responses)
+        early_result_with_timestamp = {**early_result, "computed_at": datetime.utcnow().isoformat()}
+
+        conn.execute(
+            "UPDATE assessment_state SET assessment_tier = ?, early_result = ?, updated_at = ? "
+            "WHERE id = ?",
+            (
+                "awareness_core",
+                json.dumps(early_result_with_timestamp),
+                datetime.utcnow().isoformat(),
+                row["id"],
+            ),
+        )
+
+    return {
+        **early_result,
+        "status": "success",
+        "complete": True,
+    }
+
+
+def get_next_adaptive_batch(user_id: str) -> dict[str, Any]:
+    """Return the next batch of Tier-2/3 awareness item IDs for the user,
+    advancing assessment_tier as each tier's items are exhausted.
+
+    Delegates the actual item-selection logic entirely to
+    adaptive_engine.select_next_awareness_items (pure, deterministic) --
+    this tool's job is orchestration: read current tier + responses from the
+    DB, call the router for that tier, and persist the tier transition when
+    a tier has nothing left to offer (anti-patterns-god-service: routing
+    logic lives in adaptive_engine.py, not here).
+
+    Tier progression handled here: awareness_core -> awareness_deepdive
+    (once every Tier-2 item is answered) -> complete (once every Tier-3
+    screener AND every flagged dimension's full expansion is answered).
+    assessment_tier is never accepted from the caller -- it is always read
+    fresh from assessment_state (backend-business-logic-protection: server-
+    authoritative tier, the LLM cannot request a tier).
+
+    Returns {status, items: list[str], tier: str, done: bool}. done=True
+    means the CURRENT tier has no more items (items will be empty); the
+    caller should call advance_phase('profile') once tier == "complete".
+    """
+    with get_db_session() as conn:
+        row = _get_assessment_state_row(conn, user_id)
+        if not row:
+            return {"status": "error", "message": "No assessment data found"}
+
+        current_tier = row["assessment_tier"]
+        if current_tier not in ("awareness_core", "awareness_deepdive"):
+            return {
+                "status": "error",
+                "message": f"get_next_adaptive_batch is not valid for tier '{current_tier}'",
+            }
+
+        qb = get_question_bank()
+        responses = json.loads(row["responses"] or "{}")
+        answered_ids = set(responses.keys())
+
+        if current_tier == "awareness_core":
+            items = select_next_awareness_items(responses, answered_ids, qb, "awareness_core")
+            if items:
+                return {"status": "success", "items": items, "tier": "awareness_core", "done": False}
+
+            # Tier 2 fully answered -- advance to Tier 3 and fall through to
+            # serve its first batch in this same call (no empty round-trip).
+            conn.execute(
+                "UPDATE assessment_state SET assessment_tier = ?, updated_at = ? WHERE id = ?",
+                ("awareness_deepdive", datetime.utcnow().isoformat(), row["id"]),
+            )
+            current_tier = "awareness_deepdive"
+
+        items = select_next_awareness_items(responses, answered_ids, qb, "awareness_deepdive")
+        if items:
+            return {"status": "success", "items": items, "tier": "awareness_deepdive", "done": False}
+
+        # Tier 3 fully answered (every screener + every flagged expansion) --
+        # the whole awareness flow is complete.
+        conn.execute(
+            "UPDATE assessment_state SET assessment_tier = ?, updated_at = ? WHERE id = ?",
+            ("complete", datetime.utcnow().isoformat(), row["id"]),
+        )
+
+    return {"status": "success", "items": [], "tier": "complete", "done": True}
 
 
 def generate_profile_snapshot(user_id: str) -> dict[str, Any]:

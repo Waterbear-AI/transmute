@@ -186,12 +186,19 @@ def seed_user(conn, email: str, password: str) -> str:
 
 
 def seed_assessment(conn, user_id: str, archetype: str) -> None:
-    """Seed assessment_state with archetype-keyed Likert answers.
+    """Seed assessment_state with archetype-keyed Likert + scenario answers.
 
-    Answers every question in the question bank. Each dimension receives ≥60%
-    of its questions answered, satisfying the _check_assessment_completion_gate.
-    TC sub-dimension scores are set to produce the target archetype; all other
-    dimensions use a score of 3 (neutral baseline).
+    Answers every Likert question and every scenario in the question bank,
+    and marks assessment_tier='complete' -- satisfying the tiered
+    _check_assessment_completion_gate (BE-004), which requires
+    assessment_tier=='complete' rather than the old per-dimension
+    >=60%-answered check. TC sub-dimension scores are set to produce the
+    target archetype; all other Likert dimensions use a score of 3 (neutral
+    baseline). Every scenario is answered with choice 'a' (transmuter-
+    weighted in every scenario per data/questions.json), which is harmless
+    for archetype placement here since the TC Likert scores already
+    determine the target archetype and dominate the 60% Likert / 40%
+    scenario blend in scoring_engine._calculate_quadrant.
 
     For reverse_scored questions, the raw DB value is inverted so the effective
     Likert interpretation matches the archetype target.
@@ -217,17 +224,31 @@ def seed_assessment(conn, user_id: str, archetype: str) -> None:
             raw = (6 - effective) if is_rev else effective
             responses[qid] = {"score": raw}
 
+    scenario_responses: dict[str, Any] = {}
+    for s in qb.get_all_scenarios():
+        choice_key = "a"
+        quadrant_weight = {}
+        for c in s.get("choices", []):
+            if c["key"] == choice_key:
+                quadrant_weight = c.get("quadrant_weight", {})
+                break
+        scenario_responses[s["id"]] = {
+            "choice": choice_key,
+            "quadrant_weight": quadrant_weight,
+            "maslow_level": s.get("maslow_level"),
+        }
+
     state_id = str(uuid.uuid4())
     now = datetime.utcnow().isoformat()
     conn.execute(
         "INSERT INTO assessment_state "
-        "(id, user_id, responses, scenario_responses, created_at) "
-        "VALUES (?, ?, ?, '{}', ?)",
-        (state_id, user_id, json.dumps(responses), now),
+        "(id, user_id, responses, scenario_responses, assessment_tier, created_at) "
+        "VALUES (?, ?, ?, ?, 'complete', ?)",
+        (state_id, user_id, json.dumps(responses), json.dumps(scenario_responses), now),
     )
     logger.info(
-        "seed_assessment: wrote %d responses for user_id=%s archetype=%s",
-        len(responses), user_id, archetype,
+        "seed_assessment: wrote %d responses + %d scenario responses for user_id=%s archetype=%s",
+        len(responses), len(scenario_responses), user_id, archetype,
     )
 
 

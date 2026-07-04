@@ -14,6 +14,9 @@ from agents.transmutation.tools import (
     save_scenario_response,
     advance_phase,
     flag_safety_concern,
+    present_transmute_core_batch,
+    evaluate_transmute_core_complete,
+    get_next_adaptive_batch,
 )
 
 DESCRIPTION = (
@@ -40,5 +43,8 @@ def create_assessment_agent(model: Union[str, BaseLlm] = "") -> LlmAgent:
             save_scenario_response,
             advance_phase,
             flag_safety_concern,
+            present_transmute_core_batch,
+            evaluate_transmute_core_complete,
+            get_next_adaptive_batch,
         ],
     )

@@ -118,7 +118,7 @@ class TestAssessmentStateFromRow:
                 (
                     aid,
                     uid,
-                    "validated_scale",
+                    "awareness_core",
                     '["emotional_regulation", "systems_thinking"]',
                     '["emotional_regulation"]',
                     '{"tier": "transmute_core", "summary": "early result"}',
@@ -129,7 +129,7 @@ class TestAssessmentStateFromRow:
             ).fetchone()
 
         state = AssessmentState.from_row(row)
-        assert state.assessment_tier == "validated_scale"
+        assert state.assessment_tier == "awareness_core"
         assert state.flagged_dimensions == ["emotional_regulation", "systems_thinking"]
         assert state.deep_dive_dimensions == ["emotional_regulation"]
         assert state.early_result == {"tier": "transmute_core", "summary": "early result"}

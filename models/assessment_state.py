@@ -5,8 +5,11 @@ from typing import Any, Literal, Optional
 from pydantic import BaseModel
 
 # The tiered assessment flow a user progresses through:
-#   transmute_core -> validated_scale -> deep_dive (entered only for flagged dimensions)
-AssessmentTier = Literal["transmute_core", "validated_scale", "deep_dive"]
+#   transmute_core -> awareness_core -> awareness_deepdive (only flagged dims) -> complete
+# Matches the tier values used in data/questions.json item metadata
+# (question_bank.get_questions_by_tier) so the same literal is valid on both
+# item records and assessment_state rows.
+AssessmentTier = Literal["transmute_core", "awareness_core", "awareness_deepdive", "complete"]
 
 
 class AssessmentState(BaseModel):
