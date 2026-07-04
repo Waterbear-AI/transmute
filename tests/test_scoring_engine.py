@@ -8,10 +8,13 @@ Validates:
 
 import pytest
 
+import config
 from agents.transmutation.scoring_engine import (
     _map_archetype,
     _calculate_quadrant,
     _enrich_scenario_responses,
+    _score_likert_by_dimension,
+    compute_early_transmute_result,
     normalize_score,
     score_question_subset,
     CONDUIT_THRESHOLD,
@@ -381,4 +384,263 @@ class TestScoreQuestionSubset:
         responses = {"q1": {"score": 3}, "unknown": {"score": 5}}
         result = score_question_subset(responses, ["q1", "unknown"], qb)
         assert "Focus" in result
+
+
+# ---------------------------------------------------------------------------
+# _score_likert_by_dimension: MIN_ITEMS_PER_DIM sufficiency (BE-002)
+# ---------------------------------------------------------------------------
+
+
+class TestScoreLikertByDimensionSufficiency:
+    """Sufficiency rule: insufficient = answered_count < MIN_ITEMS_PER_DIM (=2).
+
+    Replaces the old na_pct > 0.2 rule. Scope is _score_likert_by_dimension
+    ONLY -- score_question_subset (sentinel, tested above) is a separate
+    function with its own single-item-scores-fine behavior and must not
+    change (TestScoreQuestionSubset above continues to pass unmodified).
+    """
+
+    @staticmethod
+    def _make_qb(dimension_questions: dict[str, list[dict]]):
+        """Build a minimal mock QuestionBank supporting get_dimensions() and
+        get_questions_by_dimension(), as _score_likert_by_dimension needs."""
+
+        class MockQB:
+            def __init__(self, dim_qs):
+                self._dim_qs = dim_qs
+                self.scale_types = {"agreement_5": {"points": 5}, "frequency_5": {"points": 5}}
+
+            def get_dimensions(self):
+                return list(self._dim_qs.keys())
+
+            def get_questions_by_dimension(self, dim):
+                return self._dim_qs.get(dim, [])
+
+        return MockQB(dimension_questions)
+
+    def test_one_answered_item_is_insufficient(self):
+        """MIN_ITEMS_PER_DIM default is 2 -- exactly 1 answered is insufficient."""
+        qb = self._make_qb({
+            "Focus": [
+                {"id": "q1", "sub_dimension": "gen", "reverse_scored": False, "scale_type": "agreement_5"},
+                {"id": "q2", "sub_dimension": "gen", "reverse_scored": False, "scale_type": "agreement_5"},
+                {"id": "q3", "sub_dimension": "gen", "reverse_scored": False, "scale_type": "agreement_5"},
+            ],
+        })
+        responses = {"q1": {"score": 4}}
+        result = _score_likert_by_dimension(responses, qb)
         assert result["Focus"]["answered"] == 1
+        assert result["Focus"]["insufficient_data"] is True
+
+    def test_two_answered_items_is_sufficient(self):
+        """Exactly MIN_ITEMS_PER_DIM (2) answered is sufficient."""
+        qb = self._make_qb({
+            "Focus": [
+                {"id": "q1", "sub_dimension": "gen", "reverse_scored": False, "scale_type": "agreement_5"},
+                {"id": "q2", "sub_dimension": "gen", "reverse_scored": False, "scale_type": "agreement_5"},
+                {"id": "q3", "sub_dimension": "gen", "reverse_scored": False, "scale_type": "agreement_5"},
+            ],
+        })
+        responses = {"q1": {"score": 4}, "q2": {"score": 3}}
+        result = _score_likert_by_dimension(responses, qb)
+        assert result["Focus"]["answered"] == 2
+        assert result["Focus"]["insufficient_data"] is False
+
+    def test_zero_answered_items_is_insufficient(self):
+        qb = self._make_qb({
+            "Focus": [
+                {"id": "q1", "sub_dimension": "gen", "reverse_scored": False, "scale_type": "agreement_5"},
+            ],
+        })
+        result = _score_likert_by_dimension({}, qb)
+        assert result["Focus"]["answered"] == 0
+        assert result["Focus"]["insufficient_data"] is True
+
+    def test_all_items_answered_is_sufficient(self):
+        """A small dimension where every item is answered (>= MIN_ITEMS_PER_DIM)."""
+        qb = self._make_qb({
+            "Focus": [
+                {"id": "q1", "sub_dimension": "gen", "reverse_scored": False, "scale_type": "agreement_5"},
+                {"id": "q2", "sub_dimension": "gen", "reverse_scored": False, "scale_type": "agreement_5"},
+            ],
+        })
+        responses = {"q1": {"score": 4}, "q2": {"score": 2}}
+        result = _score_likert_by_dimension(responses, qb)
+        assert result["Focus"]["insufficient_data"] is False
+
+    def test_na_responses_do_not_count_as_answered(self):
+        """A response present with score=None (explicit N/A) still counts as
+        unanswered for the MIN_ITEMS_PER_DIM check, matching the old na_pct
+        rule's treatment of N/A responses."""
+        qb = self._make_qb({
+            "Focus": [
+                {"id": "q1", "sub_dimension": "gen", "reverse_scored": False, "scale_type": "agreement_5"},
+                {"id": "q2", "sub_dimension": "gen", "reverse_scored": False, "scale_type": "agreement_5"},
+                {"id": "q3", "sub_dimension": "gen", "reverse_scored": False, "scale_type": "agreement_5"},
+            ],
+        })
+        responses = {"q1": {"score": 4}, "q2": {"score": None}}
+        result = _score_likert_by_dimension(responses, qb)
+        assert result["Focus"]["answered"] == 1
+        assert result["Focus"]["insufficient_data"] is True
+
+    def test_high_na_pct_no_longer_makes_a_dimension_insufficient_alone(self):
+        """The OLD na_pct > 0.2 rule would have flagged this (2/12 answered =
+        83% N/A). The NEW rule only cares about the absolute answered count,
+        so 2 answered items (>= MIN_ITEMS_PER_DIM) is sufficient even in a
+        large dimension where most items are unanswered."""
+        qb = self._make_qb({
+            "BigDim": [
+                {"id": f"q{i}", "sub_dimension": "gen", "reverse_scored": False, "scale_type": "agreement_5"}
+                for i in range(12)
+            ],
+        })
+        responses = {"q0": {"score": 4}, "q1": {"score": 3}}
+        result = _score_likert_by_dimension(responses, qb)
+        assert result["BigDim"]["answered"] == 2
+        assert result["BigDim"]["insufficient_data"] is False
+
+    def test_respects_configured_min_items_per_dim(self):
+        """The threshold is read from TransmutationSettings.MIN_ITEMS_PER_DIM,
+        not hardcoded -- raising it should raise the sufficiency bar."""
+        config._settings = None
+        settings = config.get_settings()
+        original = settings.transmutation.MIN_ITEMS_PER_DIM
+        try:
+            settings.transmutation.MIN_ITEMS_PER_DIM = 3
+            qb = self._make_qb({
+                "Focus": [
+                    {"id": "q1", "sub_dimension": "gen", "reverse_scored": False, "scale_type": "agreement_5"},
+                    {"id": "q2", "sub_dimension": "gen", "reverse_scored": False, "scale_type": "agreement_5"},
+                    {"id": "q3", "sub_dimension": "gen", "reverse_scored": False, "scale_type": "agreement_5"},
+                ],
+            })
+            responses = {"q1": {"score": 4}, "q2": {"score": 3}}  # 2 answered, now < 3
+            result = _score_likert_by_dimension(responses, qb)
+            assert result["Focus"]["insufficient_data"] is True
+        finally:
+            settings.transmutation.MIN_ITEMS_PER_DIM = original
+
+
+# ---------------------------------------------------------------------------
+# compute_early_transmute_result (BE-002)
+# ---------------------------------------------------------------------------
+
+
+def _tc_responses(n_answered: int) -> dict:
+    """Build responses answering the first n_answered of the 8 real
+    Transmutation Capacity items from the actual v2 question bank, each with
+    a neutral-ish score. Uses the real QuestionBank (not a mock) since
+    compute_early_transmute_result internally calls get_question_bank()."""
+    from agents.transmutation.question_bank import get_question_bank
+
+    qb = get_question_bank()
+    tc_items = qb.get_questions_by_dimension("Transmutation Capacity")
+    responses = {}
+    for item in tc_items[:n_answered]:
+        responses[item["id"]] = {"score": 4}
+    return responses
+
+
+def _scenario_responses(n_answered: int) -> dict:
+    """Build scenario_responses answering the first n_answered of the 10 real
+    scenarios, each choosing option 'a' (transmuter-weighted in every
+    scenario per data/questions.json)."""
+    from agents.transmutation.question_bank import get_question_bank
+
+    qb = get_question_bank()
+    scenarios = qb.get_all_scenarios()
+    responses = {}
+    for s in scenarios[:n_answered]:
+        responses[s["id"]] = {"choice": "a"}
+    return responses
+
+
+class TestComputeEarlyTransmuteResult:
+    """compute_early_transmute_result: wraps _calculate_quadrant for
+    (x, y, archetype) but computes its own confidence + confidence_reason."""
+
+    def test_returns_expected_dict_shape(self):
+        result = compute_early_transmute_result(_tc_responses(8), _scenario_responses(6))
+        assert result["event_type"] == "assessment.transmute_result"
+        for key in ("archetype", "x", "y", "confidence", "confidence_reason"):
+            assert key in result
+
+    def test_high_confidence_at_conf_high_thresholds(self):
+        """8/8 TC (>= CONF_HIGH_TC=6) + 6/10 scenarios (>= CONF_HIGH_SCEN=6) -> high."""
+        result = compute_early_transmute_result(_tc_responses(8), _scenario_responses(6))
+        assert result["confidence"] == "high"
+
+    def test_medium_confidence_between_low_and_high_bands(self):
+        """8 TC (>= CONF_HIGH_TC) but only 3 scenarios: >= MIN_SCENARIOS(3) so
+        not low, but < CONF_HIGH_SCEN(6) so not high -> medium."""
+        result = compute_early_transmute_result(_tc_responses(8), _scenario_responses(3))
+        assert result["confidence"] == "medium"
+
+    def test_low_confidence_with_one_tc_item(self):
+        """1 TC answered (< MIN_ITEMS_PER_DIM=2) -> low regardless of scenarios."""
+        result = compute_early_transmute_result(_tc_responses(1), _scenario_responses(6))
+        assert result["confidence"] == "low"
+
+    def test_low_confidence_with_zero_scenarios(self):
+        """0 scenarios (< MIN_SCENARIOS=3) -> low even with full TC."""
+        result = compute_early_transmute_result(_tc_responses(8), _scenario_responses(0))
+        assert result["confidence"] == "low"
+
+    def test_confidence_reason_is_a_nonempty_string(self):
+        result = compute_early_transmute_result(_tc_responses(8), _scenario_responses(6))
+        assert isinstance(result["confidence_reason"], str)
+        assert len(result["confidence_reason"]) > 0
+
+    def test_confidence_reason_differs_by_band(self):
+        """The plain-language reason should not be identical across bands
+        (Barnum mitigation -- it must actually communicate the real state)."""
+        high = compute_early_transmute_result(_tc_responses(8), _scenario_responses(6))
+        low = compute_early_transmute_result(_tc_responses(1), _scenario_responses(0))
+        assert high["confidence_reason"] != low["confidence_reason"]
+
+    def test_does_not_reuse_calculate_quadrant_confidence_field(self):
+        """_calculate_quadrant's own confidence is scenario-count-only
+        (>=3 votes -> high/medium) and lacks a reason -- this function must
+        compute an independent confidence, not just forward that value."""
+        # 6 scenarios each casting a 1.0 'a'=transmuter vote -> 6 total votes,
+        # so _calculate_quadrant's OWN rule would call this "high" too, but
+        # verify by using an input where the two rules diverge: 8 TC + exactly
+        # 3 scenario votes needs _calculate_quadrant's total_scenario_votes>=3
+        # (also high there) but THIS function's own CONF_HIGH_SCEN=6 threshold
+        # is not met, so it must independently report "medium".
+        result = compute_early_transmute_result(_tc_responses(8), _scenario_responses(3))
+        assert result["confidence"] == "medium"
+
+    def test_zero_scenarios_and_zero_tc_still_returns_event_type(self):
+        """Even the worst-case empty input must not crash and must still
+        carry event_type (mandatory -- drives the chat re-emit path)."""
+        result = compute_early_transmute_result({}, {})
+        assert result["event_type"] == "assessment.transmute_result"
+        assert result["confidence"] == "low"
+
+    def test_archetype_x_y_come_from_calculate_quadrant(self):
+        """Sanity: the (x, y, archetype) triple matches what
+        _calculate_quadrant computes for the same inputs (this function
+        wraps it rather than reimplementing quadrant placement).
+
+        compute_early_transmute_result runs _enrich_scenario_responses
+        before _calculate_quadrant (scenario responses built with just
+        {"choice": ...} have no quadrant_weight/maslow_level until enriched).
+        The "expected" oracle call below must enrich its OWN separate
+        scenario_responses dict the same way, or it will compare against an
+        un-enriched _calculate_quadrant call that sees zero scenario votes
+        and always reports x=0.0/y=0.0 regardless of archetype."""
+        from agents.transmutation.question_bank import get_question_bank
+
+        qb = get_question_bank()
+        responses = _tc_responses(8)
+
+        dim_scores = _score_likert_by_dimension(responses, qb)
+        expected_scenario_responses = _enrich_scenario_responses(_scenario_responses(6), qb)
+        expected_quadrant = _calculate_quadrant(dim_scores, expected_scenario_responses, qb)
+
+        result = compute_early_transmute_result(responses, _scenario_responses(6))
+        assert result["archetype"] == expected_quadrant["archetype"]
+        assert result["x"] == expected_quadrant["x"]
+        assert result["y"] == expected_quadrant["y"]

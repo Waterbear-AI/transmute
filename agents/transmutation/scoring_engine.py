@@ -209,6 +209,97 @@ def score_responses(
     }
 
 
+def compute_early_transmute_result(
+    responses: dict[str, Any],
+    scenario_responses: dict[str, Any],
+) -> dict[str, Any]:
+    """Compute the Tier-1 "early transmute result" event payload.
+
+    Wraps _calculate_quadrant for the (x, y, archetype) triple, but computes
+    its OWN confidence band and confidence_reason -- deliberately NOT reusing
+    _calculate_quadrant's built-in "confidence" field, which is scenario-vote-
+    count-only (>=3 votes -> "high") and carries no explanatory reason. This
+    function's confidence instead reflects how much Tier-1 data (both TC
+    Likert items AND scenarios) actually went into the placement:
+
+        high   -- >= CONF_HIGH_TC TC items answered AND
+                  >= CONF_HIGH_SCEN scenarios answered
+        low    -- < MIN_ITEMS_PER_DIM TC items answered OR
+                  < MIN_SCENARIOS scenarios answered
+        medium -- everything else (enough data to be meaningful, not enough
+                  for the high-confidence bar)
+
+    Returns a dict whose event_type is mandatory: api/chat.py's existing
+    tool-return-dict re-emit path (only dicts containing "event_type" are
+    re-emitted as a named SSE event) is how this rides to the frontend --
+    there is no separate emit call here.
+    """
+    qb = get_question_bank()
+
+    scenario_responses = _enrich_scenario_responses(scenario_responses, qb)
+    dim_scores = _score_likert_by_dimension(responses, qb)
+    quadrant = _calculate_quadrant(dim_scores, scenario_responses, qb)
+
+    tc_data = dim_scores.get("Transmutation Capacity", {})
+    tc_answered = tc_data.get("answered", 0)
+    scenarios_answered = len(scenario_responses)
+
+    settings = get_settings().transmutation
+    confidence, confidence_reason = _early_result_confidence(
+        tc_answered=tc_answered,
+        scenarios_answered=scenarios_answered,
+        min_items_per_dim=settings.MIN_ITEMS_PER_DIM,
+        min_scenarios=settings.MIN_SCENARIOS,
+        conf_high_tc=settings.CONF_HIGH_TC,
+        conf_high_scen=settings.CONF_HIGH_SCEN,
+    )
+
+    return {
+        "event_type": "assessment.transmute_result",
+        "archetype": quadrant["archetype"],
+        "x": quadrant["x"],
+        "y": quadrant["y"],
+        "confidence": confidence,
+        "confidence_reason": confidence_reason,
+    }
+
+
+def _early_result_confidence(
+    tc_answered: int,
+    scenarios_answered: int,
+    min_items_per_dim: int,
+    min_scenarios: int,
+    conf_high_tc: int,
+    conf_high_scen: int,
+) -> tuple[str, str]:
+    """Confidence band + plain-language reason for compute_early_transmute_result.
+
+    Split out from compute_early_transmute_result for readability (it has one
+    job: turn two answered-counts into a confidence band and an honest,
+    Barnum-mitigating explanation of why).
+    """
+    if tc_answered < min_items_per_dim or scenarios_answered < min_scenarios:
+        return (
+            "low",
+            f"Based on {tc_answered} core answers and {scenarios_answered} scenario "
+            "responses so far -- too early to say much. A few more answers will "
+            "sharpen this.",
+        )
+
+    if tc_answered >= conf_high_tc and scenarios_answered >= conf_high_scen:
+        return (
+            "high",
+            f"Based on {tc_answered} core answers and {scenarios_answered} scenario "
+            "responses -- a solid first read on your pattern.",
+        )
+
+    return (
+        "medium",
+        f"Based on {tc_answered} core answers and {scenarios_answered} scenario "
+        "responses so far. A few more in the next section will sharpen this.",
+    )
+
+
 def _score_likert_by_dimension(
     responses: dict[str, Any],
     qb,
@@ -255,7 +346,16 @@ def _score_likert_by_dimension(
 
         # Compute dimension-level stats
         na_pct = na_count / total_questions if total_questions > 0 else 0
-        insufficient = na_pct > 0.2 or len(dim_scores) == 0
+        # Sufficiency: absolute minimum answered items, not a percentage of
+        # N/A responses. A dimension can now have plenty of items but only a
+        # few actually administered (v2 tiered/screener-first flow), so an
+        # na_pct-based rule would wrongly flag a fully-answered screener as
+        # insufficient just because most of the dimension's OTHER items were
+        # never shown. Scope: this function only -- score_question_subset
+        # (the sentinel scorer) is untouched and keeps its own
+        # any-answered-item-scores behavior.
+        min_items = get_settings().transmutation.MIN_ITEMS_PER_DIM
+        insufficient = len(dim_scores) < min_items
 
         avg = sum(dim_scores) / len(dim_scores) if dim_scores else 0.0
 
