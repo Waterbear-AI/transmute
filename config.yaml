@@ -18,3 +18,16 @@ model_costs:
 transmutation:
   tau: 1.0                        # asymmetry coefficient (R5)
   maslow_weights: [5, 4, 3, 2, 1] # weights for weighted total moral work (R4)
+
+  # Tiered-assessment sufficiency / confidence thresholds
+  MIN_ITEMS_PER_DIM: 2   # min answered items for a dimension to be "sufficient"
+  MIN_SCENARIOS: 3       # min answered SJT scenarios for Tier-1 completion
+  CONF_HIGH_TC: 6        # TC items answered (of 8) for "high" early-result confidence
+  CONF_HIGH_SCEN: 6      # scenarios answered (of 10) for "high" early-result confidence
+
+  # Adaptive router thresholds (agents/transmutation/adaptive_engine.py),
+  # all on the 1-5 reverse-scored screener scale
+  adaptive:
+    LOW_CUT: 2.75              # screener mean at/below this -> expand
+    BORDERLINE_MARGIN: 0.5     # screener mean within this of 3.0 -> expand
+    INCONSISTENT_RANGE: 2.0    # screener max-min at/above this -> expand

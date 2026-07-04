@@ -39,7 +39,7 @@ import os
 import sys
 import uuid
 from datetime import datetime, timedelta
-from typing import Any
+from typing import Any, Optional
 
 # ---------------------------------------------------------------------------
 # Logging setup (structured banner for CLI use)
@@ -79,6 +79,10 @@ VALID_ARCHETYPES = ["transmuter", "absorber", "magnifier", "extractor", "conduit
 #   X (Amplification A): Fulfillment Emission → +X, Absorption Patterns → -X
 #   Y (Filtering F): Deprivation Filtering → +Y, Amplification Awareness → +Y
 #
+# v2 item bank (BE-003) dropped the Conduit Recognition sub-dimension from
+# Tier-1 TC (Product Decision 1) -- the 4 remaining sub-dimensions below are
+# the full v2 TC axis set.
+#
 # archetype -> {sub_dimension -> effective_score}
 _ARCHETYPE_TC_SCORES: dict[str, dict[str, int]] = {
     "transmuter": {
@@ -86,35 +90,30 @@ _ARCHETYPE_TC_SCORES: dict[str, dict[str, int]] = {
         "Fulfillment Emission": 5,    # +X
         "Amplification Awareness": 5, # +Y
         "Absorption Patterns": 1,     # −X (low absorption = emit-side)
-        "Conduit Recognition": 5,
     },
     "absorber": {
         "Deprivation Filtering": 5,   # +Y
         "Fulfillment Emission": 1,    # −X
         "Amplification Awareness": 5, # +Y
         "Absorption Patterns": 5,     # −X (high absorption = absorb-side)
-        "Conduit Recognition": 3,
     },
     "magnifier": {
         "Deprivation Filtering": 1,   # −Y
         "Fulfillment Emission": 5,    # +X
         "Amplification Awareness": 1, # −Y
         "Absorption Patterns": 1,     # −X (low absorption = emit-side)
-        "Conduit Recognition": 3,
     },
     "extractor": {
         "Deprivation Filtering": 1,   # −Y
         "Fulfillment Emission": 1,    # −X
         "Amplification Awareness": 1, # −Y
         "Absorption Patterns": 5,     # −X
-        "Conduit Recognition": 3,
     },
     "conduit": {
         "Deprivation Filtering": 3,
         "Fulfillment Emission": 3,
         "Amplification Awareness": 3,
         "Absorption Patterns": 3,
-        "Conduit Recognition": 5,
     },
 }
 
@@ -127,103 +126,27 @@ _EDUCATION_CATEGORIES = [
     "external_interaction",
 ]
 
-# Hardcoded first-question-per-category lookup for all 13 dimensions.
-# Built from question_bank comprehension_checks.json; the correct_option
-# key is the known-correct answer so seeds achieve 100% score in one pass.
-# Format: dim -> {category -> (question_id, correct_option)}
-_COMPREHENSION_FIRST_Q: dict[str, dict[str, tuple[str, str]]] = {
-    "Cognitive Awareness": {
-        "what_this_means": ("cc_cog_cat1_q1", "b"),
-        "your_score": ("cc_cog_cat2_q1", "b"),
-        "daily_effects": ("cc_cog_cat3_q1", "a"),
-        "strengths_gaps": ("cc_cog_cat4_q1", "a"),
-        "external_interaction": ("cc_cog_cat5_q1", "b"),
-    },
-    "Emotional Awareness": {
-        "what_this_means": ("cc_ea_cat1_q1", "b"),
-        "your_score": ("cc_ea_cat2_q1", "b"),
-        "daily_effects": ("cc_ea_cat3_q1", "b"),
-        "strengths_gaps": ("cc_ea_cat4_q1", "b"),
-        "external_interaction": ("cc_ea_cat5_q1", "a"),
-    },
-    "Environmental Awareness": {
-        "what_this_means": ("cc_env_cat1_q1", "b"),
-        "your_score": ("cc_env_cat2_q1", "b"),
-        "daily_effects": ("cc_env_cat3_q1", "a"),
-        "strengths_gaps": ("cc_env_cat4_q1", "a"),
-        "external_interaction": ("cc_env_cat5_q1", "b"),
-    },
-    "Flow Awareness": {
-        "what_this_means": ("cc_fa_cat1_q1", "b"),
-        "your_score": ("cc_fa_cat2_q1", "b"),
-        "daily_effects": ("cc_fa_cat3_q1", "b"),
-        "strengths_gaps": ("cc_fa_cat4_q1", "b"),
-        "external_interaction": ("cc_fa_cat5_q1", "b"),
-    },
-    "Interoceptive Awareness": {
-        "what_this_means": ("cc_intero_cat1_q1", "b"),
-        "your_score": ("cc_intero_cat2_q1", "b"),
-        "daily_effects": ("cc_intero_cat3_q1", "a"),
-        "strengths_gaps": ("cc_intero_cat4_q1", "a"),
-        "external_interaction": ("cc_intero_cat5_q1", "b"),
-    },
-    "Meta-Cognitive Awareness": {
-        "what_this_means": ("cc_mca_cat1_q1", "a"),
-        "your_score": ("cc_mca_cat2_q1", "b"),
-        "daily_effects": ("cc_mca_cat3_q1", "b"),
-        "strengths_gaps": ("cc_mca_cat4_q1", "b"),
-        "external_interaction": ("cc_mca_cat5_q1", "b"),
-    },
-    "Mindfulness": {
-        "what_this_means": ("cc_mind_cat1_q1", "b"),
-        "your_score": ("cc_mind_cat2_q1", "b"),
-        "daily_effects": ("cc_mind_cat3_q1", "a"),
-        "strengths_gaps": ("cc_mind_cat4_q1", "a"),
-        "external_interaction": ("cc_mind_cat5_q1", "b"),
-    },
-    "Physical Awareness": {
-        "what_this_means": ("cc_phys_cat1_q1", "b"),
-        "your_score": ("cc_phys_cat2_q1", "b"),
-        "daily_effects": ("cc_phys_cat3_q1", "b"),
-        "strengths_gaps": ("cc_phys_cat4_q1", "a"),
-        "external_interaction": ("cc_phys_cat5_q1", "b"),
-    },
-    "Social Awareness": {
-        "what_this_means": ("cc_sa_cat1_q1", "b"),
-        "your_score": ("cc_sa_cat2_q1", "a"),
-        "daily_effects": ("cc_sa_cat3_q1", "b"),
-        "strengths_gaps": ("cc_sa_cat4_q1", "a"),
-        "external_interaction": ("cc_sa_cat5_q1", "b"),
-    },
-    "Spatial Awareness": {
-        "what_this_means": ("cc_spat_cat1_q1", "b"),
-        "your_score": ("cc_spat_cat2_q1", "b"),
-        "daily_effects": ("cc_spat_cat3_q1", "a"),
-        "strengths_gaps": ("cc_spat_cat4_q1", "a"),
-        "external_interaction": ("cc_spat_cat5_q1", "b"),
-    },
-    "Systemic Awareness": {
-        "what_this_means": ("cc_sys_cat1_q1", "c"),
-        "your_score": ("cc_sys_cat2_q1", "b"),
-        "daily_effects": ("cc_sys_cat3_q1", "b"),
-        "strengths_gaps": ("cc_sys_cat4_q1", "b"),
-        "external_interaction": ("cc_sys_cat5_q1", "b"),
-    },
-    "Temporal Awareness": {
-        "what_this_means": ("cc_temp_cat1_q1", "b"),
-        "your_score": ("cc_temp_cat2_q1", "b"),
-        "daily_effects": ("cc_temp_cat3_q1", "a"),
-        "strengths_gaps": ("cc_temp_cat4_q1", "a"),
-        "external_interaction": ("cc_temp_cat5_q1", "b"),
-    },
-    "Transmutation Capacity": {
-        "what_this_means": ("cc_tc_cat1_q1", "c"),
-        "your_score": ("cc_tc_cat2_q1", "b"),
-        "daily_effects": ("cc_tc_cat3_q1", "a"),
-        "strengths_gaps": ("cc_tc_cat4_q1", "b"),
-        "external_interaction": ("cc_tc_cat5_q1", "b"),
-    },
-}
+# The previous version of this file hardcoded a dim -> {category ->
+# (question_id, correct_option)} lookup, duplicating data already present in
+# comprehension_checks.json (and requiring a manual re-sync every time the
+# question/dimension set changed -- exactly the drift the v2 rewrite hit,
+# since the v1 map still referenced cut dimensions like Flow/Spatial/
+# Environmental/Cognitive). `_first_comprehension_answer` below derives the
+# same (question_id, correct_option) pair directly from QuestionBank at seed
+# time instead, so it can never go stale relative to comprehension_checks.json.
+
+
+def _first_comprehension_answer(qb, dimension: str, category: str) -> Optional[tuple[str, str]]:
+    """Return (question_id, correct_option) for the first question in a
+    dimension's comprehension category, or None if the category has no
+    comprehension questions yet (e.g. a new dimension awaiting its
+    comprehension_checks.json content).
+    """
+    questions = qb.get_comprehension_questions_for_category(dimension, category)
+    if not questions:
+        return None
+    first = questions[0]
+    return first["id"], first["correct_option"]
 
 
 # ---------------------------------------------------------------------------
@@ -340,18 +263,27 @@ def seed_education(user_id: str) -> None:
     """Seed education progress for the 3 weakest dimensions.
 
     Loads the profile snapshot, identifies the top-3 weakest dimensions
-    (by raw score), and records one correct comprehension answer per category
-    for each of them — satisfying the 5-categories-each gate. Scores are 100%.
+    (by raw score -- same ranking _check_education_completion_gate uses), and
+    records one correct comprehension answer per category for each of them —
+    satisfying the 5-categories-each gate. Scores are 100%.
+
+    A dimension/category with no comprehension content yet in
+    comprehension_checks.json is skipped (mirrors the gate's own waiver for
+    content gaps, see tools._check_education_completion_gate) rather than
+    treated as a seeder failure.
 
     Raises:
-        RuntimeError: if no profile snapshot exists or a comprehension Q is missing.
+        RuntimeError: if no profile snapshot exists, or record_comprehension_answer
+            errors on content that IS present (a real seeder bug).
     """
+    from agents.transmutation.question_bank import get_question_bank
     from agents.transmutation.tools import record_comprehension_answer, get_user_profile
 
     profile = get_user_profile(user_id)
     if not profile.get("exists"):
         raise RuntimeError("seed_education: no profile snapshot found — run seed_profile first")
 
+    qb = get_question_bank()
     scores = profile["scores"]
     # Sort dimensions by ascending score to find the 3 weakest
     ranked = sorted(
@@ -361,15 +293,12 @@ def seed_education(user_id: str) -> None:
     top3 = [dim for dim, _ in ranked[:3]]
 
     for dim in top3:
-        dim_qs = _COMPREHENSION_FIRST_Q.get(dim)
-        if not dim_qs:
-            logger.warning("seed_education: no comprehension map for dim=%s, skipping", dim)
-            continue
         for cat in _EDUCATION_CATEGORIES:
-            entry = dim_qs.get(cat)
+            entry = _first_comprehension_answer(qb, dim, cat)
             if not entry:
                 logger.warning(
-                    "seed_education: no question entry for dim=%s cat=%s, skipping", dim, cat
+                    "seed_education: no comprehension content for dim=%s cat=%s, skipping "
+                    "(waived by the education gate too)", dim, cat,
                 )
                 continue
             qid, correct_option = entry

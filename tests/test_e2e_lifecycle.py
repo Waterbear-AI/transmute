@@ -408,12 +408,19 @@ class TestCheckInJourney:
         # ── (3) compare against graduation — must now see real deltas.
         comparison = generate_comparison_snapshot(uid, grad_snap_id)
         assert "error" not in comparison
-        # Pick any dim from the comparison and verify the delta is non-zero
-        # (every dim moved 3.0 → 5.0 on the raw 1–5 scale; 50.0 on the
-        # 0–100 normalized scale).
-        any_delta = next(iter(comparison["deltas"].values()))
-        assert any_delta["delta"] != 0
-        assert any_delta["current"] > any_delta["previous"]
+        # Transmutation Capacity's mix of reverse/non-reverse items nets to
+        # 3.5 (not 3.0) when every raw response is 5, so it is guaranteed to
+        # show a real delta against the 3.0 baseline. NOT every dimension in
+        # the v2 item bank behaves this way: a dimension with an exact 50/50
+        # reverse-scored split (e.g. Emotional Awareness & Regulation, Mindful
+        # Presence) nets to exactly 3.0 under uniform raw=5 answers, which
+        # would produce a spurious delta==0 here if picked via
+        # `next(iter(comparison["deltas"].values()))` -- deltas is keyed from
+        # a `set()` in generate_comparison_snapshot, so iteration order is not
+        # guaranteed to avoid those dimensions.
+        tc_delta = comparison["deltas"]["Transmutation Capacity"]
+        assert tc_delta["delta"] != 0
+        assert tc_delta["current"] > tc_delta["previous"]
 
         # ── (4) regression detection — must now run end-to-end.
         verdict = detect_check_in_regression(uid)

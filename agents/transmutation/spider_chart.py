@@ -25,22 +25,25 @@ BG_COLOR = "#FAFBFD"
 GRID_COLOR = "#D0D8E8"
 LABEL_COLOR = "#2C3E50"
 
-# Short display names for dimensions
+# Short display names for dimensions (v2 tiered item bank; see questions.json)
 DIMENSION_LABELS = {
-    "Emotional Awareness": "Emotional",
-    "Social Awareness": "Social",
-    "Meta-Cognitive Awareness": "Meta-Cognitive",
-    "Physical Awareness": "Physical",
-    "Spatial Awareness": "Spatial",
-    "Temporal Awareness": "Temporal",
-    "Interoceptive Awareness": "Interoceptive",
-    "Environmental Awareness": "Environmental",
-    "Cognitive Awareness": "Cognitive",
-    "Mindfulness": "Mindfulness",
-    "Flow Awareness": "Flow",
     "Transmutation Capacity": "Transmutation",
-    "Systemic Awareness": "Systemic",
+    "Emotional Awareness & Regulation": "Emotional",
+    "Reflective Functioning": "Reflective",
+    "Self-Compassion": "Self-Compassion",
+    "Relational Awareness & Compassion": "Relational",
+    "Meta-Cognitive Awareness": "Meta-Cognitive",
+    "Mindful Presence": "Mindful",
+    "Systemic/Temporal Awareness": "Systemic/Temporal",
 }
+
+# The dimension(s) that measure actual transmutation capacity (get the orange
+# "transmutarian" marker on the radar chart), as opposed to the awareness
+# dimensions that are prerequisites for it. v1 also flagged Flow Awareness and
+# Systemic Awareness here, but Flow was cut (redundant with SJT scenarios) and
+# Systemic was folded into the narrower Systemic/Temporal deep-dive dimension,
+# so Transmutation Capacity is the sole transmutarian marker in v2.
+TRANSMUTARIAN_DIMENSIONS = ("Transmutation Capacity",)
 
 
 def generate_spider_chart(
@@ -66,9 +69,7 @@ def generate_spider_chart(
             continue
         dims.append(DIMENSION_LABELS.get(dim_name, dim_name))
         scores.append(dim_data.get("score", 0.0))
-        is_transmutarian.append(
-            dim_name in ("Flow Awareness", "Transmutation Capacity", "Systemic Awareness")
-        )
+        is_transmutarian.append(dim_name in TRANSMUTARIAN_DIMENSIONS)
 
     if not dims:
         return _generate_empty_chart()

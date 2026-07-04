@@ -38,9 +38,27 @@ class ModelSettings(BaseSettings):
         return os.environ.get(self.api_key_env)
 
 
+class AdaptiveSettings(BaseSettings):
+    """Thresholds for adaptive_engine.should_expand_dimension routing decisions.
+
+    All three operate on the 1-5 reverse-scored screener scale.
+    """
+
+    LOW_CUT: float = 2.75
+    BORDERLINE_MARGIN: float = 0.5
+    INCONSISTENT_RANGE: float = 2.0
+
+
 class TransmutationSettings(BaseSettings):
     tau: float = 1.0
     maslow_weights: list[int] = [5, 4, 3, 2, 1]
+
+    # Tiered-assessment sufficiency / confidence thresholds (B8.4).
+    MIN_ITEMS_PER_DIM: int = 2
+    MIN_SCENARIOS: int = 3
+    CONF_HIGH_TC: int = 6
+    CONF_HIGH_SCEN: int = 6
+    adaptive: AdaptiveSettings = AdaptiveSettings()
 
 
 class ModelCost(BaseSettings):
