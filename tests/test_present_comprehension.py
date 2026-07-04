@@ -41,8 +41,8 @@ def _set_progress(user_id: str, progress: dict) -> None:
         )
 
 
-# Real IDs from comprehension_checks.json (Emotional Awareness / what_this_means)
-DIM = "Emotional Awareness"
+# Real IDs from comprehension_checks.json (Emotional Awareness & Regulation / what_this_means)
+DIM = "Emotional Awareness & Regulation"
 CAT = "what_this_means"
 Q1_ID = "cc_ea_cat1_q1"
 Q2_ID = "cc_ea_cat1_q2"

@@ -93,11 +93,15 @@ class TestFirstComprehensionAnswer:
         assert correct_option == "c"
 
     def test_returns_none_for_dimension_with_no_content(self):
-        """A v2-only dimension with no comprehension_checks.json entry yet
-        returns None instead of raising -- comprehension_checks.json
-        regeneration is a separate task; this must not crash the seeder."""
+        """A dimension/category combination with no comprehension_checks.json
+        entry returns None instead of raising -- e.g. a future v3 dimension
+        not yet authored, or (as exercised here) a real v2 dimension paired
+        with a category name that doesn't exist. This must not crash the
+        seeder; DOC-001 has since regenerated comprehension_checks.json for
+        all 8 real v2 dimensions, so this test now uses a synthetic gap
+        instead of a real dimension that used to lack content."""
         qb = get_question_bank()
-        result = _first_comprehension_answer(qb, "Self-Compassion", "what_this_means")
+        result = _first_comprehension_answer(qb, "Self-Compassion", "not_a_real_category")
         assert result is None
 
     def test_returns_none_for_unknown_dimension(self):

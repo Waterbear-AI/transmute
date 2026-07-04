@@ -20,11 +20,20 @@ from agents.transmutation import tools
 from db.database import get_db_session
 
 # ── The contract (intentionally defined here, not imported, so the test pins it) ──
+# v2 (DOC-001): 8 dimensions, replacing the v1 13-dimension set. Cut: Cognitive
+# Awareness (merged into Meta-Cognitive), Environmental Awareness (folded into
+# Systemic/Temporal), Flow Awareness (redundant with scenarios), Physical
+# Awareness (folded into Emotional Awareness & Regulation's body-noticing
+# facet), Spatial Awareness, Social Awareness (folded into Relational
+# Awareness & Compassion), Temporal Awareness (merged into Systemic/Temporal).
+# Added: Reflective Functioning, Self-Compassion, Relational Awareness &
+# Compassion. Renamed: Emotional Awareness -> Emotional Awareness & Regulation,
+# Systemic Awareness -> Systemic/Temporal Awareness, Mindfulness -> Mindful
+# Presence.
 CANONICAL_DIMENSIONS = {
-    "Cognitive Awareness", "Emotional Awareness", "Environmental Awareness",
-    "Flow Awareness", "Interoceptive Awareness", "Meta-Cognitive Awareness",
-    "Mindfulness", "Physical Awareness", "Social Awareness", "Spatial Awareness",
-    "Systemic Awareness", "Temporal Awareness", "Transmutation Capacity",
+    "Transmutation Capacity", "Emotional Awareness & Regulation", "Reflective Functioning",
+    "Self-Compassion", "Relational Awareness & Compassion", "Meta-Cognitive Awareness",
+    "Mindful Presence", "Systemic/Temporal Awareness",
 }
 REQUIRED_CATEGORIES = {
     "what_this_means", "your_score", "daily_effects",
@@ -33,7 +42,7 @@ REQUIRED_CATEGORIES = {
 VALID_TYPES = {"apply_concept", "identify_pattern", "predict_outcome"}
 VALID_DIFFICULTY = {"foundational", "applied"}
 MIN_QUESTIONS_PER_CATEGORY = 2
-EXPECTED_TOTAL = 130
+EXPECTED_TOTAL = 80
 
 CONTENT_PATH = DATA_DIR / "comprehension_checks.json"
 
@@ -137,10 +146,10 @@ def _answered_all_categories(correct: bool = True) -> dict:
 
 class TestRecordAnswerForNewlyAuthoredDimension:
     def test_correct_answer_in_previously_contentless_dimension(self):
-        """AC7: record_comprehension_answer resolves for a new-dimension question."""
-        # Mindfulness had no content before this change; pick its first question.
+        """AC7: record_comprehension_answer resolves for a v2 dimension's question."""
+        # Mindful Presence is one of the newly regenerated v2 dimensions.
         qb = qb_mod.get_question_bank()
-        qid = "cc_mind_cat1_q1"
+        qid = "cc_mp_cat1_q1"
         question = qb.get_comprehension_question_by_id(qid)
         assert question is not None, "new comprehension content not loaded"
 
@@ -149,7 +158,7 @@ class TestRecordAnswerForNewlyAuthoredDimension:
             _seed_user(conn, uid)
 
         result = tools.record_comprehension_answer(
-            uid, "Mindfulness", "what_this_means", qid, question["correct_option"],
+            uid, "Mindful Presence", "what_this_means", qid, question["correct_option"],
         )
         assert result["correct"] is True
         assert result["score"] == 100
@@ -158,18 +167,18 @@ class TestRecordAnswerForNewlyAuthoredDimension:
 
 class TestEducationGateWithFullContent:
     def test_gate_passes_when_contentless_dims_now_covered(self):
-        """AC8a: top-3 weakest including previously content-less dims passes when answered."""
+        """AC8a: top-3 weakest v2 dimensions pass when answered."""
         uid = str(uuid.uuid4())
-        # Make three formerly content-less dimensions the weakest three.
+        # Make three v2 dimensions the weakest three.
         scores = {
-            "Mindfulness": {"score": 1.0},
-            "Physical Awareness": {"score": 1.1},
-            "Spatial Awareness": {"score": 1.2},
-            "Emotional Awareness": {"score": 4.0},
+            "Mindful Presence": {"score": 1.0},
+            "Self-Compassion": {"score": 1.1},
+            "Systemic/Temporal Awareness": {"score": 1.2},
+            "Emotional Awareness & Regulation": {"score": 4.0},
         }
         progress = {
             dim: _answered_all_categories(correct=True)
-            for dim in ("Mindfulness", "Physical Awareness", "Spatial Awareness")
+            for dim in ("Mindful Presence", "Self-Compassion", "Systemic/Temporal Awareness")
         }
         with get_db_session() as conn:
             _seed_user(conn, uid)
@@ -181,15 +190,15 @@ class TestEducationGateWithFullContent:
     def test_gate_blocks_when_weak_dim_below_60_percent(self):
         """Sanity: a content-bearing dim answered but <60% correct still blocks."""
         uid = str(uuid.uuid4())
-        scores = {"Mindfulness": {"score": 1.0}}
-        progress = {"Mindfulness": _answered_all_categories(correct=False)}  # 0%
+        scores = {"Mindful Presence": {"score": 1.0}}
+        progress = {"Mindful Presence": _answered_all_categories(correct=False)}  # 0%
         with get_db_session() as conn:
             _seed_user(conn, uid)
             _seed_profile_scores(conn, uid, scores)
             _seed_education_progress(conn, uid, progress)
             result = tools._check_education_completion_gate(conn, uid)
         assert result is not None
-        assert result["dimension"] == "Mindfulness"
+        assert result["dimension"] == "Mindful Presence"
 
 
 class TestR6ContentGapGuard:

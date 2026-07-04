@@ -20,10 +20,11 @@ from agents.transmutation.tools import (
 )
 
 DESCRIPTION = (
-    "Guides users through the transmutation awareness assessment. "
-    "Presents Likert-scale questions grouped by dimension and behavioral scenarios. "
+    "Guides users through the transmute-first, tiered transmutation assessment. "
+    "Presents Transmutation Capacity items and scenarios first (Tier 1, producing an "
+    "early result), then adaptive awareness items (Tiers 2-3). "
     "Handles pacing, save points, N/A responses, and transitions to profile generation "
-    "when all dimensions have sufficient coverage."
+    "once the tiered flow reports assessment_tier == 'complete'."
 )
 
 
