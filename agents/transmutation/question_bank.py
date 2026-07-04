@@ -51,6 +51,32 @@ class QuestionBank:
             len(self._scenarios_by_id),
             len(self._questions_by_dimension),
         )
+        self._harden_sub_dimensions()
+
+    def _harden_sub_dimensions(self) -> None:
+        """Warn about items with a missing/blank sub_dimension field.
+
+        `get_sub_dimensions()` derives its index purely from item tags (there
+        is no separately declared sub-dimension registry in this codebase --
+        `leverage_engine.rank_transmutation_gaps` validates caller-supplied
+        sub-dimensions against this same derived index). That means a
+        sub-dimension can never be "referenced with zero items" from inside
+        `QuestionBank` alone -- the actual silent-data-loss risk visible here
+        is an item whose `sub_dimension` is missing or blank, which would
+        otherwise fall back to the implicit `"general"` bucket in
+        `scoring_engine._score_likert_by_dimension` without anyone noticing
+        the item never got the sub-dimension breakdown its dimension expects.
+        """
+        for dimension, questions in self._questions_by_dimension.items():
+            for q in questions:
+                sub = q.get("sub_dimension")
+                if not sub:
+                    logger.warning(
+                        "Question bank item missing sub_dimension: "
+                        "id=%r dimension=%r -- falls back to 'general'",
+                        q.get("id"),
+                        dimension,
+                    )
 
     @property
     def meta(self) -> dict[str, Any]:
@@ -102,6 +128,34 @@ class QuestionBank:
                 seen.add(sub)
                 result.append(sub)
         return sorted(result)
+
+    def get_questions_by_tier(self, tier: str) -> list[dict]:
+        """Return all Likert items whose `tier` field matches, across dimensions.
+
+        Tiers: "transmute_core" (Tier 1), "awareness_core" (Tier 2),
+        "awareness_deepdive" (Tier 3). Returns [] for an unknown tier.
+        """
+        self._ensure_loaded()
+        return [q for q in self._questions_by_id.values() if q.get("tier") == tier]
+
+    def get_screener_items(self, dimension: Optional[str] = None) -> list[dict]:
+        """Return items flagged `is_screener=True`.
+
+        With `dimension`, scopes to that dimension only (returns [] for an
+        unknown dimension or a dimension with no screener items). Without it,
+        returns every screener item across the whole bank.
+        """
+        self._ensure_loaded()
+        if dimension is not None:
+            questions = self._questions_by_dimension.get(dimension, [])
+        else:
+            questions = self._questions_by_id.values()
+        return [q for q in questions if q.get("is_screener")]
+
+    def get_items_by_instrument(self, instrument: str) -> list[dict]:
+        """Return all items citing the given `instrument` value verbatim."""
+        self._ensure_loaded()
+        return [q for q in self._questions_by_id.values() if q.get("instrument") == instrument]
 
     def get_full_data(self) -> dict[str, Any]:
         """Return the full question bank JSON (for GET /api/assessment/questions)."""

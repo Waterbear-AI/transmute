@@ -83,9 +83,9 @@ class TestAssessmentAPI:
         data = resp.json()
         assert "questions" in data
         assert "scenarios" in data
-        # Question bank holds the full assessment: 200 Likert questions + 20 scenarios
-        assert len(data["questions"]) == 200
-        assert len(data["scenarios"]) == 20
+        # v2 item bank (BE-003): 75 Likert questions + 10 scenarios
+        assert len(data["questions"]) == 75
+        assert len(data["scenarios"]) == 10
 
     def test_get_state_empty(self, authenticated_client):
         resp = authenticated_client.get("/api/assessment/state")
@@ -96,7 +96,7 @@ class TestAssessmentAPI:
     def test_save_response_requires_assessment_phase(self, authenticated_client):
         """User starts in orientation phase, can't save responses yet."""
         resp = authenticated_client.post("/api/assessment/responses", json={
-            "question_id": "ea_rec_01",
+            "question_id": "ea_attn_01",
             "score": 4,
         })
         # User is in orientation phase — not in RESPONSE_SAVE_PHASES, so 403 Forbidden.
@@ -115,13 +115,13 @@ class TestAssessmentAPI:
         conn.close()
 
         resp = authenticated_client.post("/api/assessment/responses", json={
-            "question_id": "ea_rec_01",
+            "question_id": "ea_attn_01",
             "score": 4,
         })
         assert resp.status_code == 200
         data = resp.json()
         assert data["saved"] is True
-        assert data["question_id"] == "ea_rec_01"
+        assert data["question_id"] == "ea_attn_01"
         assert "progress" in data
 
     def test_save_na_response(self, authenticated_client):
@@ -136,7 +136,7 @@ class TestAssessmentAPI:
         conn.close()
 
         resp = authenticated_client.post("/api/assessment/responses", json={
-            "question_id": "ea_rec_01",
+            "question_id": "ea_attn_01",
             "score": None,
             "skipped_reason": "not_applicable",
         })
@@ -156,9 +156,9 @@ class TestAssessmentAPI:
 
         resp = authenticated_client.post("/api/assessment/responses/batch", json={
             "responses": [
-                {"question_id": "ea_rec_01", "score": 4},
-                {"question_id": "ea_rec_02", "score": 3},
-                {"question_id": "ea_rec_03", "score": 2},
+                {"question_id": "ea_attn_01", "score": 4},
+                {"question_id": "ea_attn_02", "score": 3},
+                {"question_id": "ea_clar_01", "score": 2},
             ],
         })
         assert resp.status_code == 200
