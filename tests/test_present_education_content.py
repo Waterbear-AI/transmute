@@ -64,6 +64,15 @@ class TestPresentEducationContentSuccess:
         assert result.get("event_type") == "education.content"
         assert result.get("status") == "success"
 
+    def test_success_logs_info_with_context(self, caplog):
+        """Successful captures must be logged at info with user_id/dimension/category
+        (infrastructure-structured-logging) -- never the full content body."""
+        uid = _create_user()
+        with caplog.at_level("INFO"):
+            present_education_content(uid, DIM, CAT, "Some explanation text.")
+        info_records = [r for r in caplog.records if r.levelname == "INFO"]
+        assert any("captured" in r.message.lower() for r in info_records)
+
     def test_returns_required_fields(self):
         uid = _create_user()
         result = present_education_content(uid, DIM, CAT, "Some explanation text.")
@@ -107,6 +116,15 @@ class TestPresentEducationContentValidation:
         assert result.get("status") == "error"
         assert "event_type" not in result
         assert _count_rows(uid) == 0
+
+    def test_unknown_dimension_logs_warning(self, caplog):
+        """Validation failures must be logged at warning (infrastructure-structured-logging)."""
+        uid = _create_user()
+        with caplog.at_level("WARNING"):
+            present_education_content(uid, "Bogus Dimension", CAT, "text")
+        assert any(
+            "unknown dimension" in r.message.lower() for r in caplog.records
+        )
 
     def test_unknown_category_returns_error(self):
         uid = _create_user()
