@@ -205,6 +205,34 @@ const Results = (() => {
         }
     }
 
+    /**
+     * Public: apply a regenerated early_result (from an edit's save response)
+     * to the results panel. Mirrors the assessment.transmute_result SSE
+     * handler (handleSSEEvent above): merges into the existing
+     * assessment_state (never clobbers answered/total/dimension_progress) so
+     * the stored value alone is enough to redraw both the progress bars and
+     * the early-result card on the next render — including after a
+     * _switchTab, which clears+repaints from stored state only (B6.2).
+     *
+     * Called by ScenarioCard/LikertCard after a save whose response body
+     * carries a non-null early_result (a transmute-relevant edit). The
+     * existing renderEarlyResult(el, earlyResult) is DOM-coupled (needs a
+     * container element) and is not meant to be called directly by widgets —
+     * this method owns storing the data and deciding whether/how to redraw.
+     */
+    function applyEarlyResult(earlyResult) {
+        if (!earlyResult) return;
+        _resultsData.assessment_state = Object.assign(
+            {}, _resultsData.assessment_state, { early_result: earlyResult }
+        );
+        // Storing into assessment_state can flip the Assessment tab from
+        // hidden to visible (_isTabVisible gates it on _resultsData.assessment_state
+        // truthiness) -- re-render the tab strip so that becomes reachable,
+        // matching every other handler that mutates _resultsData (handleSSEEvent).
+        _renderTabs();
+        if (_activeTab === 'assessment') _renderTabContent('assessment');
+    }
+
     function _renderTabs() {
         const tabsEl = document.getElementById('results-tabs');
         tabsEl.textContent = '';
@@ -1591,6 +1619,7 @@ const Results = (() => {
         update,
         handlePhaseTransition,
         handleSSEEvent,
-        renderEarlyResult
+        renderEarlyResult,
+        applyEarlyResult
     };
 })();
