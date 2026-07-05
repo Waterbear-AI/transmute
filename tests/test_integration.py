@@ -288,7 +288,8 @@ class TestMigrations:
         conn.close()
         expected = [
             "adk_sessions", "assessment_state", "check_in_log",
-            "development_roadmap", "dimension_assessment_state", "education_progress",
+            "development_roadmap", "dimension_assessment_state", "education_content",
+            "education_progress",
             "graduation_record", "llm_calls", "moral_ledger", "practice_journal",
             "profile_snapshots", "roadmap_practices", "safety_log", "schema_version",
             "users",

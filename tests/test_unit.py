@@ -133,7 +133,8 @@ class TestMigrationRunner:
             assert "dimension_assessment_state" in tables
             assert "llm_calls" in tables  # from migration 007
             assert "title" in cols  # from migration 008
-            assert len(tables) == 15  # +llm_calls (007); roadmap_practices (005); 008 adds column only
+            assert "education_content" in tables  # from migration 011
+            assert len(tables) == 16  # +llm_calls (007); roadmap_practices (005); 008 adds column only; +education_content (011)
         finally:
             os.unlink(db_path)
 
