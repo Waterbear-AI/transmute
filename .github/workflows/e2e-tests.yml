@@ -21,7 +21,12 @@ jobs:
         run: pip install -r requirements.txt
 
       - name: Run unit and integration tests
-        run: python3 -m pytest tests/test_unit.py tests/test_integration.py -v --tb=short
+        # Full suite (pytest.ini: testpaths = tests) -- was pinned to just
+        # test_unit.py/test_integration.py from when those were the only two
+        # files; the suite has since grown to 40+ files (assessment
+        # editability's BE-001/BE-002 tests included) that this job would
+        # otherwise silently skip.
+        run: python3 -m pytest tests/ --ignore=tests/e2e -v --tb=short
         env:
           DB_PATH: /tmp/test_transmutation.db
           OPENAI_API_KEY: test-key
