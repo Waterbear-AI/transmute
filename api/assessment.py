@@ -17,6 +17,7 @@ from api.auth import get_current_user_id
 from db.database import get_db_session
 from rate_limit import limiter
 from agents.transmutation.question_bank import get_question_bank
+from agents.transmutation.scoring_engine import compute_early_transmute_result
 from agents.transmutation.tools import _compute_progress, RESPONSE_SAVE_PHASES
 
 logger = logging.getLogger(__name__)
@@ -44,12 +45,14 @@ class ResponseSaveResult(BaseModel):
     saved: bool
     question_id: str
     progress: dict[str, Any]
+    early_result: Optional[dict[str, Any]] = None
 
 
 class BatchResponseResult(BaseModel):
     saved: int
     errors: list[str]
     progress: dict[str, Any]
+    early_result: Optional[dict[str, Any]] = None
 
 
 class AssessmentProgressResponse(BaseModel):
@@ -127,8 +130,15 @@ def save_response(
                 (json.dumps(scenario_responses), datetime.utcnow().isoformat(), user_id, user_id),
             )
 
+            # Scenarios are always transmute-relevant: recompute the cached
+            # early_result (if one already exists) so the results panel never
+            # shows a stale archetype after the user changes a prior choice.
+            early_result = _maybe_regenerate_early_result(conn, user_id, responses, scenario_responses)
+
         progress = _compute_progress(responses, scenario_responses)
-        return ResponseSaveResult(saved=True, question_id=body.question_id, progress=progress)
+        return ResponseSaveResult(
+            saved=True, question_id=body.question_id, progress=progress, early_result=early_result
+        )
 
     question = qb.get_question_by_id(body.question_id)
     if not question:
@@ -151,8 +161,14 @@ def save_response(
             (json.dumps(responses), datetime.utcnow().isoformat(), user_id, user_id),
         )
 
+        early_result = None
+        if _is_transmute_relevant(question):
+            early_result = _maybe_regenerate_early_result(conn, user_id, responses, scenario_responses)
+
     progress = _compute_progress(responses, scenario_responses)
-    return ResponseSaveResult(saved=True, question_id=body.question_id, progress=progress)
+    return ResponseSaveResult(
+        saved=True, question_id=body.question_id, progress=progress, early_result=early_result
+    )
 
 
 @router.post("/responses/batch", response_model=BatchResponseResult)
@@ -169,6 +185,7 @@ def save_responses_batch(
         _validate_assessment_phase(conn, user_id)
         responses, scenario_responses = _get_or_create_state(conn, user_id)
 
+        any_transmute_relevant = False
         for resp in body.responses:
             question = qb.get_question_by_id(resp.question_id)
             if not question:
@@ -183,17 +200,90 @@ def save_responses_batch(
                 "answered_at": datetime.utcnow().isoformat(),
             }
             saved_count += 1
+            if _is_transmute_relevant(question):
+                any_transmute_relevant = True
 
         conn.execute(
             "UPDATE assessment_state SET responses = ?, updated_at = ? WHERE user_id = ? AND id = (SELECT id FROM assessment_state WHERE user_id = ? ORDER BY created_at DESC LIMIT 1)",
             (json.dumps(responses), datetime.utcnow().isoformat(), user_id, user_id),
         )
 
+        early_result = None
+        if any_transmute_relevant:
+            early_result = _maybe_regenerate_early_result(conn, user_id, responses, scenario_responses)
+
     progress = _compute_progress(responses, scenario_responses)
-    return BatchResponseResult(saved=saved_count, errors=errors, progress=progress)
+    return BatchResponseResult(saved=saved_count, errors=errors, progress=progress, early_result=early_result)
 
 
 # --- Helpers ---
+
+def _is_transmute_relevant(question: dict[str, Any]) -> bool:
+    """True if a Likert question's answer feeds the Tier-1 early_result.
+
+    Mirrors the Tier-1 sufficiency check in evaluate_transmute_core_complete:
+    transmute_core-tier items (fallback: Transmutation Capacity dimension,
+    in case tier is absent on older question-bank entries) are the only
+    Likert items compute_early_transmute_result actually consumes. Awareness
+    items are upserted normally but never trigger a recompute -- the full
+    dimension profile is computed fresh at profile time, so there is no
+    stale early_result to fix for those edits.
+    """
+    return (
+        question.get("tier") == "transmute_core"
+        or question.get("dimension") == "Transmutation Capacity"
+    )
+
+
+def _maybe_regenerate_early_result(
+    conn, user_id: str, responses: dict, scenario_responses: dict
+) -> Optional[dict[str, Any]]:
+    """Recompute + persist the cached early_result after a transmute-relevant edit.
+
+    Uses the SAME transaction/connection as the triggering upsert
+    (backend-transaction-management: upsert + recompute + persist atomically
+    -- no window where the answer is saved but the cached score is stale).
+
+    _get_or_create_state deliberately does not SELECT early_result (it only
+    needs responses/scenario_responses to build the upsert payload), so this
+    helper does its own dedicated read of the current early_result.
+
+    If early_result is NULL, Tier 1 hasn't completed yet -- the initial
+    early_result is produced by evaluate_transmute_core_complete once
+    sufficiency is reached, so there is nothing to regenerate yet and this
+    returns None (anti-patterns-happy-path-only: an explicit "nothing to do"
+    branch, not an exception).
+
+    If early_result already exists, recomputes it from current answers via
+    the pure compute_early_transmute_result (scoring math is never
+    reimplemented here) and persists it with the same computed_at timestamp
+    shape the agent path writes at tools.py:935-943, so no consumer of
+    early_result ever sees a payload missing that field.
+    """
+    row = conn.execute(
+        "SELECT id, early_result FROM assessment_state WHERE user_id = ? "
+        "ORDER BY created_at DESC LIMIT 1",
+        (user_id,),
+    ).fetchone()
+
+    if not row or not row["early_result"]:
+        return None
+
+    result = compute_early_transmute_result(responses, scenario_responses)
+    stored = {**result, "computed_at": datetime.utcnow().isoformat()}
+
+    conn.execute(
+        "UPDATE assessment_state SET early_result = ?, updated_at = ? WHERE id = ?",
+        (json.dumps(stored), datetime.utcnow().isoformat(), row["id"]),
+    )
+
+    logger.info(
+        "early_result regenerated on edit",
+        extra={"user_id": user_id, "archetype": stored.get("archetype")},
+    )
+
+    return stored
+
 
 def _validate_assessment_phase(conn, user_id: str) -> None:
     """Ensure user is in a phase that allows saving Likert responses.
