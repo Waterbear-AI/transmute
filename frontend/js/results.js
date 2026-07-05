@@ -977,72 +977,15 @@ const Results = (() => {
     }
 
     function _renderEducation(el) {
+        // The Education tab is purely the learning journal: the captured agent
+        // teaching for each section, as a Dimension -> Category accordion.
+        // Progress bars / per-dimension understanding scores were intentionally
+        // removed — the user wants to review what was taught, not a scoreboard.
+        // `data` may be absent when the tab is visible only because the user is
+        // in the education phase (no content captured yet) — the journal then
+        // renders its empty state.
         const data = _resultsData.education_progress;
-        // No progress/content data yet (tab is visible purely because the user is
-        // in the education phase) — still render the journal so its empty state
-        // ("Your learning notes will appear here...") is reachable immediately,
-        // per FR-6/A2. There is nothing else to show without a data row.
-        if (!data) {
-            _renderEducationJournal(el, null);
-            return;
-        }
-
-        const header = document.createElement('h3');
-        Sanitize.setText(header, 'Education Progress');
-        el.appendChild(header);
-
-        // Summary section
-        const summary = data.summary || {};
-        if (summary.total_categories) {
-            const sumEl = document.createElement('div');
-            sumEl.className = 'results-summary';
-            sumEl.style.margin = '12px 0';
-            const completed = summary.completed_categories || 0;
-            const total = summary.total_categories || 0;
-            const pct = summary.completion_pct || (total > 0 ? Math.round(completed / total * 100) : 0);
-            Sanitize.setText(sumEl, completed + ' / ' + total + ' categories completed (' + pct + '%)');
-            el.appendChild(sumEl);
-            el.appendChild(_createProgressBar(total > 0 ? completed / total : 0));
-        }
-
-        // Per-dimension breakdown
-        const progress = data.progress || {};
-        const dims = Object.keys(progress);
-        if (dims.length > 0) {
-            const dimHeader = document.createElement('h4');
-            dimHeader.style.marginTop = '16px';
-            Sanitize.setText(dimHeader, 'By Dimension');
-            el.appendChild(dimHeader);
-
-            for (const dim of dims) {
-                const cats = progress[dim] || {};
-                const dimEl = document.createElement('div');
-                dimEl.className = 'results-dimension';
-                dimEl.style.margin = '12px 0';
-
-                const dimLabel = document.createElement('strong');
-                Sanitize.setText(dimLabel, dim);
-                dimEl.appendChild(dimLabel);
-
-                // Always render all 5 canonical categories in teaching order,
-                // even ones the user hasn't reached yet (they show 0%), so the
-                // tab reflects the full dimension — e.g. "Category 5: External
-                // Interaction" is visible before it's started.
-                EDUCATION_CATEGORIES.forEach((cat, i) => {
-                    const catData = cats[cat.key] || {};
-                    const catEl = document.createElement('div');
-                    catEl.style.margin = '4px 0 4px 12px';
-                    const score = catData.understanding_score || 0;
-                    Sanitize.setText(catEl, (i + 1) + '. ' + cat.label + ': ' + score + '%');
-                    dimEl.appendChild(catEl);
-                    dimEl.appendChild(_createProgressBar(score / 100));
-                });
-
-                el.appendChild(dimEl);
-            }
-        }
-
-        _renderEducationJournal(el, data.content);
+        _renderEducationJournal(el, data ? data.content : null);
     }
 
     // ── Education journal ("What You've Learned") ────────────────────────────
