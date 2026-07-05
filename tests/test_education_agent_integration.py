@@ -42,13 +42,21 @@ class TestEducationAgentToolRegistration:
             f"present_continue_prompt not found in tools: {tool_names}"
         )
 
+    def test_present_education_content_registered(self):
+        """present_education_content must be in the education agent tools (BE-001)."""
+        tool_names = self._get_tool_names()
+        assert "present_education_content" in tool_names, (
+            f"present_education_content not found in tools: {tool_names}"
+        )
+
     def test_core_tools_present(self):
-        """All seven expected tools are present — no accidental removals."""
+        """All eight expected tools are present — no accidental removals."""
         tool_names = self._get_tool_names()
         expected = {
             "get_user_profile",
             "get_education_progress",
             "present_comprehension_question",
+            "present_education_content",
             "record_comprehension_answer",
             "present_continue_prompt",
             "advance_phase",
@@ -60,8 +68,8 @@ class TestEducationAgentToolRegistration:
     def test_no_extra_unexpected_tools(self):
         """The tool count matches expected — no accidental additions."""
         tool_names = self._get_tool_names()
-        assert len(tool_names) == 7, (
-            f"Expected 7 tools, got {len(tool_names)}: {tool_names}"
+        assert len(tool_names) == 8, (
+            f"Expected 8 tools, got {len(tool_names)}: {tool_names}"
         )
 
 
@@ -115,6 +123,20 @@ class TestEducationPromptInstructions:
             "prompt does not mention present_continue_prompt"
         )
 
+    def test_prompt_instructs_use_of_present_education_content(self):
+        """The prompt must tell the agent to deliver teaching via present_education_content (BE-001)."""
+        prompt = self._get_prompt()
+        assert "present_education_content" in prompt, (
+            "prompt does not mention present_education_content"
+        )
+
+    def test_prompt_forbids_markdown_teaching_content(self):
+        """The prompt must instruct the agent NOT to also write the explanation as markdown."""
+        prompt = self._get_prompt()
+        assert "Do NOT also write that explanation as" in prompt, (
+            "prompt does not forbid duplicating teaching content as markdown"
+        )
+
 
 class TestToolFunctionImports:
     """Verify the imports in education.py are correct and importable."""
@@ -136,3 +158,15 @@ class TestToolFunctionImports:
         source = inspect.getsource(edu_module)
         assert "present_comprehension_question" in source
         assert "record_comprehension_answer" in source
+
+    def test_present_education_content_importable_from_tools(self):
+        """present_education_content must be importable from agents.transmutation.tools (BE-001)."""
+        from agents.transmutation.tools import present_education_content
+        assert callable(present_education_content)
+
+    def test_education_agent_imports_present_education_content(self):
+        """education.py must import present_education_content from agents.transmutation.tools."""
+        from agents.transmutation.sub_agents import education as edu_module
+        import inspect
+        source = inspect.getsource(edu_module)
+        assert "present_education_content" in source

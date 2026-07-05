@@ -59,6 +59,26 @@ EDUCATION_CATEGORIES = [
 ]
 EDUCATION_CATEGORY_KEYS = [key for key, _ in EDUCATION_CATEGORIES]
 
+# Cache for the canonical dimension allowlist (populated lazily on first use;
+# avoids rescanning the question bank on every present_education_content call).
+_canonical_dimensions_cache: Optional[set[str]] = None
+
+
+def _get_canonical_dimensions() -> set[str]:
+    """Return the set of canonical dimension names from the question bank.
+
+    Single source of truth for dimension validation: the distinct `dimension`
+    values across all questions, i.e. the same set scoring/profile use. Cached
+    after first computation since the question bank is static per process.
+    """
+    global _canonical_dimensions_cache
+    if _canonical_dimensions_cache is None:
+        qb = get_question_bank()
+        _canonical_dimensions_cache = {
+            q["dimension"] for q in qb.get_full_data().get("questions", [])
+        }
+    return _canonical_dimensions_cache
+
 
 # ── Exit-gate thresholds (normalized 0–100 scale) ──────────────────────
 # These thresholds are compared against scores mapped to 0–100 via
@@ -1600,6 +1620,130 @@ def record_comprehension_answer(
         "categories_covered": categories_covered,
         "categories_total": len(qb_categories),
     }
+
+
+# Max length (characters) for a single captured teaching content block.
+# Generous bound for a markdown explanation; guards against pathological
+# payloads without constraining normal teaching prose.
+EDUCATION_CONTENT_MAX_LEN = 20000
+
+_EDUCATION_CATEGORY_LABELS = dict(EDUCATION_CATEGORIES)
+
+
+def present_education_content(
+    user_id: str,
+    dimension: str,
+    category: str,
+    content: str,
+) -> dict[str, Any]:
+    """Deliver one category's teaching explanation to the user as chat content.
+
+    Call this instead of writing the substantive per-category explanation as
+    markdown text — the returned payload streams to the chat as a fresh agent
+    message AND is captured into the user's persistent learning journal
+    (visible in the Education tab). Re-calling this for the same
+    dimension+category (e.g. when re-teaching) overwrites the prior content.
+
+    Do NOT use this for dimension-transition chatter, celebrations, or
+    readiness/continue prompts — only for the actual teaching explanation of a
+    category. Those other beats stay as ordinary short text /
+    present_continue_prompt.
+
+    Args:
+        user_id: The authenticated user's ID.
+        dimension: Transmutation dimension (e.g. "Emotional Awareness & Regulation").
+            Must be one of the canonical dimensions in the question bank.
+        category: One of the five canonical categories per dimension
+            (e.g. "what_this_means", "your_score", "daily_effects",
+            "strengths_gaps", "external_interaction") — pass the KEY, not the
+            display label.
+        content: The full explanation, as markdown, to show the user. Must be
+            non-empty and no more than 20000 characters.
+
+    Returns:
+        On success: dict with ``event_type`` = "education.content", plus
+            ``dimension``, ``category``, ``category_label``, and ``content``.
+        On invalid input: {"status": "error", "message": "<description>"} —
+            nothing is persisted or streamed in this case.
+    """
+    if dimension not in _get_canonical_dimensions():
+        logger.warning(
+            "present_education_content: unknown dimension",
+            extra={"user_id": user_id, "dimension": dimension},
+        )
+        return {"status": "error", "message": f"Unknown dimension: {dimension}"}
+
+    if category not in EDUCATION_CATEGORY_KEYS:
+        logger.warning(
+            "present_education_content: unknown category",
+            extra={"user_id": user_id, "dimension": dimension, "category": category},
+        )
+        return {"status": "error", "message": f"Unknown category: {category}"}
+
+    if not content or not content.strip():
+        logger.warning(
+            "present_education_content: empty content",
+            extra={"user_id": user_id, "dimension": dimension, "category": category},
+        )
+        return {"status": "error", "message": "content must not be empty"}
+
+    if len(content) > EDUCATION_CONTENT_MAX_LEN:
+        logger.warning(
+            "present_education_content: content too long",
+            extra={
+                "user_id": user_id,
+                "dimension": dimension,
+                "category": category,
+                "length": len(content),
+            },
+        )
+        return {
+            "status": "error",
+            "message": f"content exceeds {EDUCATION_CONTENT_MAX_LEN} characters",
+        }
+
+    with get_db_session() as conn:
+        conn.execute(
+            """
+            INSERT INTO education_content (user_id, dimension, category, content, updated_at)
+            VALUES (?, ?, ?, ?, CURRENT_TIMESTAMP)
+            ON CONFLICT(user_id, dimension, category)
+            DO UPDATE SET content = excluded.content, updated_at = excluded.updated_at
+            """,
+            (user_id, dimension, category, content),
+        )
+
+    logger.info(
+        "present_education_content: captured",
+        extra={"user_id": user_id, "dimension": dimension, "category": category},
+    )
+
+    return {
+        "status": "success",
+        "event_type": "education.content",
+        "dimension": dimension,
+        "category": category,
+        "category_label": _EDUCATION_CATEGORY_LABELS.get(category, category),
+        "content": content,
+    }
+
+
+def get_education_content(user_id: str) -> dict[str, dict[str, str]]:
+    """Retrieve all captured education content for a user.
+
+    Returns content grouped by dimension then category, for consumption by
+    /api/results (the Education tab's "What You've Learned" journal).
+    """
+    with get_db_session() as conn:
+        rows = conn.execute(
+            "SELECT dimension, category, content FROM education_content WHERE user_id = ?",
+            (user_id,),
+        ).fetchall()
+
+    content: dict[str, dict[str, str]] = {}
+    for row in rows:
+        content.setdefault(row["dimension"], {})[row["category"]] = row["content"]
+    return content
 
 
 # ── Development Agent tools ────────────────────────────────────────────
