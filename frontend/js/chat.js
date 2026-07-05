@@ -301,6 +301,14 @@ const Chat = (() => {
                 _pendingWidgets.push(() => ContinuePrompt.create(data));
                 break;
 
+            case 'education.content':
+                // The coach's teaching explanation arrives as one complete
+                // block (not streamed chunks) — render it as its own fresh
+                // agent message immediately, rather than buffering like the
+                // interactive widgets above.
+                _appendEducationContent(data.content);
+                break;
+
             case 'assessment.progress':
             case 'assessment.transmute_result':
             case 'profile.snapshot':
@@ -320,120 +328,28 @@ const Chat = (() => {
         }
     }
 
-    // ── Markdown conversion ──────────────────────
-
-    /**
-     * Split a markdown table row into trimmed cell strings, dropping the
-     * outer leading/trailing pipes (e.g. "| a | b |" -> ["a", "b"]).
-     */
-    function _splitTableRow(line) {
-        return line.trim().replace(/^\|/, '').replace(/\|$/, '').split('|')
-            .map(cell => cell.trim());
-    }
-
-    /**
-     * Convert GFM tables to <table> HTML. A table is a header row, a
-     * delimiter row (pipes + dashes, e.g. "|---|---|"), and zero or more
-     * body rows — all lines starting with "|". Non-table lines pass through
-     * unchanged. Each table collapses to a single line so the downstream
-     * newline->br pass leaves it alone.
-     */
-    function _tablesToHTML(text) {
-        const isRow = line => /^\s*\|.*\|\s*$/.test(line);
-        const isDelim = line => /^\s*\|(?:\s*:?-+:?\s*\|)+\s*$/.test(line);
-        const lines = text.split('\n');
-        const out = [];
-        let i = 0;
-        while (i < lines.length) {
-            if (isRow(lines[i]) && i + 1 < lines.length && isDelim(lines[i + 1])) {
-                const header = _splitTableRow(lines[i]);
-                i += 2; // consume header + delimiter
-                const body = [];
-                while (i < lines.length && isRow(lines[i]) && !isDelim(lines[i])) {
-                    body.push(_splitTableRow(lines[i]));
-                    i += 1;
-                }
-                const thead = '<thead><tr>' +
-                    header.map(c => '<th>' + c + '</th>').join('') + '</tr></thead>';
-                const tbody = '<tbody>' + body.map(row =>
-                    '<tr>' + row.map(c => '<td>' + c + '</td>').join('') + '</tr>'
-                ).join('') + '</tbody>';
-                out.push('<table>' + thead + tbody + '</table>');
-            } else {
-                out.push(lines[i]);
-                i += 1;
-            }
-        }
-        return out.join('\n');
-    }
-
-    /**
-     * Convert basic markdown to HTML. The output is then run through
-     * Sanitize.sanitizeHTML() so only allowlisted tags survive.
-     */
-    function _markdownToHTML(text) {
-        let html = text;
-        // Code blocks (``` ... ```)
-        html = html.replace(/```(\w*)\n?([\s\S]*?)```/g, '<pre><code>$2</code></pre>');
-        // Inline code
-        html = html.replace(/`([^`]+)`/g, '<code>$1</code>');
-        // Headers (#, ##, ###, ####). Longest fences first so e.g. "### x"
-        // is not matched by the "## " rule (## requires a space after, which
-        // "###" lacks) — order is belt-and-suspenders.
-        html = html.replace(/^#### (.+)$/gm, '<h4>$1</h4>');
-        html = html.replace(/^### (.+)$/gm, '<h3>$1</h3>');
-        html = html.replace(/^## (.+)$/gm, '<h2>$1</h2>');
-        html = html.replace(/^# (.+)$/gm, '<h1>$1</h1>');
-        // Horizontal rules
-        html = html.replace(/^---+$/gm, '<br>');
-        // Blockquotes: collapse consecutive lines starting with ">" into a
-        // single <blockquote>. Inner content (bold, lists) is handled by the
-        // passes below, so this must run before bold/list processing.
-        html = html.replace(/(?:^|\n)((?:>[^\n]*(?:\n|$))+)/g, (_, block) => {
-            const inner = block.replace(/\n+$/, '').split('\n')
-                .map(line => line.replace(/^>\s?/, ''))
-                .join('\n');
-            // Keep the closing tag on its own line so the list/paragraph passes
-            // below don't swallow "</blockquote>" into the final <li>.
-            return '\n<blockquote>\n' + inner + '\n</blockquote>\n';
-        });
-        // Bold + italic
-        html = html.replace(/\*\*\*(.+?)\*\*\*/g, '<strong><em>$1</em></strong>');
-        // Bold
-        html = html.replace(/\*\*(.+?)\*\*/g, '<strong>$1</strong>');
-        // Italic
-        html = html.replace(/\*(.+?)\*/g, '<em>$1</em>');
-        // GFM tables: a header row, a |---|---| delimiter, then body rows.
-        // Runs after inline formatting so bold/code inside cells is already
-        // converted, and before the list/paragraph passes so the table's
-        // internal newlines aren't turned into <br>. Each matched block is
-        // collapsed to a single-line <table>, leaving non-table lines intact.
-        html = _tablesToHTML(html);
-        // Unordered lists (consecutive lines starting with - )
-        html = html.replace(/(?:^|\n)((?:- .+\n?)+)/g, (_, block) => {
-            const items = block.trim().split('\n').map(line =>
-                '<li>' + line.replace(/^- /, '') + '</li>'
-            ).join('');
-            return '<ul>' + items + '</ul>';
-        });
-        // Ordered lists (consecutive lines starting with N. )
-        html = html.replace(/(?:^|\n)((?:\d+\. .+\n?)+)/g, (_, block) => {
-            const items = block.trim().split('\n').map(line =>
-                '<li>' + line.replace(/^\d+\. /, '') + '</li>'
-            ).join('');
-            return '<ol>' + items + '</ol>';
-        });
-        // Paragraphs: double newlines become <p> breaks
-        html = html.replace(/\n{2,}/g, '</p><p>');
-        // Single newlines become <br>
-        html = html.replace(/\n/g, '<br>');
-        html = '<p>' + html + '</p>';
-        // Clean up empty paragraphs
-        html = html.replace(/<p>\s*<\/p>/g, '');
-        return html;
-    }
-
     // ── Message rendering ──────────────────────
+
+    /**
+     * Render an education.content payload as a fresh agent-styled message:
+     * a brand-new bubble (not appended to any in-flight streamed message),
+     * containing the captured teaching text rendered as sanitized markdown
+     * via the shared Markdown module. Used for both the live SSE event and
+     * history replay so chat and the learning journal stay byte-identical.
+     */
+    function _appendEducationContent(content) {
+        _removeThinkingIndicator();
+        const el = document.createElement('div');
+        el.className = 'chat-msg chat-msg--agent';
+        Markdown.render(el, content);
+        _messagesEl().appendChild(el);
+        // A fresh bubble was just created outside the normal chunk-append
+        // flow — reset _currentMessageEl so any subsequent streamed text
+        // opens its own new bubble instead of appending here.
+        _currentMessageEl = null;
+        _scrollToBottom();
+        return el;
+    }
 
     function _appendUserMessage(text) {
         const el = document.createElement('div');
@@ -476,10 +392,8 @@ const Chat = (() => {
             _currentMessageEl.className = 'chat-msg chat-msg--agent';
             _messagesEl().appendChild(_currentMessageEl);
         }
-        // Render markdown through the XSS-safe sanitizer
-        const html = _markdownToHTML(fullText);
-        _currentMessageEl.textContent = '';
-        _currentMessageEl.appendChild(Sanitize.sanitizeHTML(html));
+        // Render markdown through the shared XSS-safe Markdown module
+        Markdown.render(_currentMessageEl, fullText);
         _currentMessageEl = null;
         _scrollToBottom();
 
@@ -657,8 +571,7 @@ const Chat = (() => {
             } else if (msg.role === 'agent') {
                 const el = document.createElement('div');
                 el.className = 'chat-msg chat-msg--agent';
-                const html = _markdownToHTML(msg.text);
-                el.appendChild(Sanitize.sanitizeHTML(html));
+                Markdown.render(el, msg.text);
                 _messagesEl().appendChild(el);
             } else if (msg.role === 'widget') {
                 _renderHistoryWidget(msg.event_type, msg.data, answers, scenarioAnswers);
@@ -689,6 +602,12 @@ const Chat = (() => {
                 case 'education.continue':
                     el = ContinuePrompt.create(data);
                     break;
+                case 'education.content':
+                    // Replays as a fresh agent markdown message, identical to
+                    // the live-render path — the function_response event's
+                    // stored `content` is the same text the user originally saw.
+                    _appendEducationContent(data.content);
+                    return;
                 case 'phase.transition':
                     _appendPhaseTransition(data.from, data.to);
                     return;
