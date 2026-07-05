@@ -22,6 +22,28 @@ const Results = (() => {
         { key: 'strengths_gaps', label: 'Strengths & Gaps' },
         { key: 'external_interaction', label: 'External Interaction' },
     ];
+    const _EDUCATION_CATEGORY_LABELS = EDUCATION_CATEGORIES.reduce((acc, c) => {
+        acc[c.key] = c.label;
+        return acc;
+    }, {});
+
+    // Canonical question-bank dimension order (data/questions.json's distinct
+    // `dimension` values, in file order) — used only to order the "What
+    // You've Learned" journal's dimension accordion sections. Mirrors the
+    // question bank read by _get_canonical_dimensions() in
+    // agents/transmutation/tools.py — keep in sync. Any dimension not in this
+    // list (should not happen once the bank is in sync) still renders, just
+    // appended after these in object-key order rather than being dropped.
+    const EDUCATION_DIMENSION_ORDER = [
+        'Transmutation Capacity',
+        'Emotional Awareness & Regulation',
+        'Reflective Functioning',
+        'Self-Compassion',
+        'Relational Awareness & Compassion',
+        'Meta-Cognitive Awareness',
+        'Mindful Presence',
+        'Systemic/Temporal Awareness',
+    ];
 
     let _currentPhase = 'orientation';
     let _activeTab = 'orientation';
@@ -293,6 +315,13 @@ const Results = (() => {
         // (post-graduation check-ins also land in comparison_snapshots — ADR-6, FR-10).
         if (tab.id === 'reassessment') {
             return _currentPhase === 'reassessment' || !!_resultsData.comparison_snapshots;
+        }
+        // Education: visible during the education phase (even before any comprehension
+        // answer or captured content exists, so the journal's empty state is reachable)
+        // OR when progress/content data is present (BE-002 fixes the "hidden until
+        // first quiz" bug — captured teaching content alone now sets exists=true).
+        if (tab.id === 'education') {
+            return _currentPhase === 'education' || !!_resultsData.education_progress;
         }
         // Other tabs: visible when their data exists
         if (tab.dataKey) {
@@ -949,7 +978,14 @@ const Results = (() => {
 
     function _renderEducation(el) {
         const data = _resultsData.education_progress;
-        if (!data) return;
+        // No progress/content data yet (tab is visible purely because the user is
+        // in the education phase) — still render the journal so its empty state
+        // ("Your learning notes will appear here...") is reachable immediately,
+        // per FR-6/A2. There is nothing else to show without a data row.
+        if (!data) {
+            _renderEducationJournal(el, null);
+            return;
+        }
 
         const header = document.createElement('h3');
         Sanitize.setText(header, 'Education Progress');
@@ -1005,6 +1041,142 @@ const Results = (() => {
                 el.appendChild(dimEl);
             }
         }
+
+        _renderEducationJournal(el, data.content);
+    }
+
+    // ── Education journal ("What You've Learned") ────────────────────────────
+
+    /**
+     * Render the read-only "What You've Learned" nested accordion: Dimension ->
+     * Category -> captured teaching content. Only dimensions/categories that
+     * have captured content are rendered (unlike the progress bars above, which
+     * show all 5 canonical categories regardless of whether they're reached).
+     * Dimensions are ordered by canonical question-bank dimension order
+     * (fallback: insertion/object-key order for any dimension not in that
+     * list); categories within a dimension follow EDUCATION_CATEGORIES order.
+     */
+    function _renderEducationJournal(el, content) {
+        const header = document.createElement('h3');
+        header.style.marginTop = '16px';
+        Sanitize.setText(header, "What You've Learned");
+        el.appendChild(header);
+
+        const dimKeys = content ? Object.keys(content) : [];
+        if (dimKeys.length === 0) {
+            const empty = document.createElement('div');
+            empty.className = 'edu-journal__empty';
+            Sanitize.setText(empty, "Your learning notes will appear here as you go through each topic.");
+            el.appendChild(empty);
+            return;
+        }
+
+        // Canonical dimension order: EDUCATION_DIMENSION_ORDER when populated
+        // (mirrors the question bank's dimension order), then any remaining
+        // dimensions in their existing object-key (insertion) order.
+        const orderedDims = EDUCATION_DIMENSION_ORDER.filter(d => dimKeys.includes(d));
+        for (const d of dimKeys) {
+            if (!orderedDims.includes(d)) orderedDims.push(d);
+        }
+
+        const journal = document.createElement('div');
+        journal.className = 'edu-journal';
+
+        for (const dim of orderedDims) {
+            const catMap = content[dim] || {};
+            const catKeys = EDUCATION_CATEGORIES
+                .map(c => c.key)
+                .filter(key => Object.prototype.hasOwnProperty.call(catMap, key));
+            if (catKeys.length === 0) continue;
+
+            journal.appendChild(_createJournalDimension(dim, catKeys, catMap));
+        }
+
+        el.appendChild(journal);
+    }
+
+    /**
+     * Build one dimension's accordion section: a toggle button header plus a
+     * collapsible list of category sections. Mirrors the accessible
+     * collapse idiom in likert-card.js (button + aria-expanded + chevron).
+     */
+    function _createJournalDimension(dim, catKeys, catMap) {
+        const wrap = document.createElement('div');
+        wrap.className = 'edu-journal__dim';
+
+        const header = document.createElement('button');
+        header.type = 'button';
+        header.className = 'edu-journal__dim-header';
+        header.setAttribute('aria-expanded', 'false');
+
+        const chevron = document.createElement('span');
+        chevron.className = 'edu-journal__chevron';
+        chevron.setAttribute('aria-hidden', 'true');
+        chevron.textContent = '▸'; // ▸
+        header.appendChild(chevron);
+
+        const label = document.createElement('span');
+        Sanitize.setText(label, dim);
+        header.appendChild(label);
+
+        wrap.appendChild(header);
+
+        const body = document.createElement('div');
+        body.className = 'edu-journal__dim-body';
+        for (const catKey of catKeys) {
+            const catLabel = _EDUCATION_CATEGORY_LABELS[catKey] || catKey;
+            body.appendChild(_createJournalCategory(catLabel, catMap[catKey]));
+        }
+        wrap.appendChild(body);
+
+        header.addEventListener('click', () => {
+            const collapsed = wrap.classList.toggle('edu-journal__dim--collapsed');
+            header.setAttribute('aria-expanded', collapsed ? 'false' : 'true');
+            chevron.textContent = collapsed ? '▸' : '▾'; // ▸ vs ▾
+        });
+        wrap.classList.add('edu-journal__dim--collapsed');
+
+        return wrap;
+    }
+
+    /**
+     * Build one category's accordion section within a dimension: a toggle
+     * button header plus a collapsible body containing the sanitized markdown
+     * teaching content (rendered via the shared Markdown module).
+     */
+    function _createJournalCategory(catLabel, contentText) {
+        const wrap = document.createElement('div');
+        wrap.className = 'edu-journal__cat edu-journal__cat--collapsed';
+
+        const header = document.createElement('button');
+        header.type = 'button';
+        header.className = 'edu-journal__cat-header';
+        header.setAttribute('aria-expanded', 'false');
+
+        const chevron = document.createElement('span');
+        chevron.className = 'edu-journal__chevron';
+        chevron.setAttribute('aria-hidden', 'true');
+        chevron.textContent = '▸'; // ▸
+        header.appendChild(chevron);
+
+        const label = document.createElement('span');
+        Sanitize.setText(label, catLabel);
+        header.appendChild(label);
+
+        wrap.appendChild(header);
+
+        const body = document.createElement('div');
+        body.className = 'edu-journal__body';
+        Markdown.render(body, contentText || '');
+        wrap.appendChild(body);
+
+        header.addEventListener('click', () => {
+            const collapsed = wrap.classList.toggle('edu-journal__cat--collapsed');
+            header.setAttribute('aria-expanded', collapsed ? 'false' : 'true');
+            chevron.textContent = collapsed ? '▸' : '▾'; // ▸ vs ▾
+        });
+
+        return wrap;
     }
 
     // ── Development tab helpers ──────────────────────────────────────────────
