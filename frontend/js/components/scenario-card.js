@@ -21,6 +21,10 @@ const ScenarioCard = (() => {
         const choicesEl = document.createElement('div');
         choicesEl.className = 'scenario-choices';
 
+        // Fire the agent-advance signal at most once per scenario, even if the
+        // user re-selects to correct a mis-click.
+        let notified = false;
+
         for (const choice of data.choices) {
             const btn = document.createElement('button');
             btn.type = 'button';
@@ -80,6 +84,14 @@ const ScenarioCard = (() => {
                     });
                     if (!res.ok) {
                         console.error('[ScenarioCard] Save failed:', res.status);
+                        return;
+                    }
+                    // Tell the agent the scenario is answered so it advances to
+                    // the next Tier-1 item. Reuses LikertCard's batch_complete
+                    // signal, which the assessment agent already handles.
+                    if (!notified) {
+                        notified = true;
+                        _notifyScenarioAnswered(data.scenario_id);
                     }
                 } catch (err) {
                     console.error('[ScenarioCard] Save error:', err.message);
@@ -91,6 +103,21 @@ const ScenarioCard = (() => {
 
         card.appendChild(choicesEl);
         return card;
+    }
+
+    async function _notifyScenarioAnswered(scenarioId) {
+        const sessionId = App.getCurrentSessionId();
+        if (!sessionId) return;
+        try {
+            // Reuse LikertCard's batch_complete signal: the assessment agent
+            // treats it as "response saved, advance to the next item".
+            await Chat.sendMessage(sessionId, JSON.stringify({
+                type: 'batch_complete',
+                batch_id: scenarioId
+            }));
+        } catch (err) {
+            console.error('[ScenarioCard] Advance notification failed:', err.message);
+        }
     }
 
     return { create };
