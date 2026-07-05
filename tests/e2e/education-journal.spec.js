@@ -244,4 +244,21 @@ test.describe('Education journal ("What You\'ve Learned")', () => {
         const xssFired = await page.evaluate(() => window._xssFired);
         expect(xssFired).toBeUndefined();
     });
+
+    // ── Negative visibility case ────────────────────────────────────────────
+
+    test('journal-09: Education tab is hidden when not in the education phase and no education data exists', async ({ page }) => {
+        page._jsErrors = [];
+        page.on('pageerror', err => page._jsErrors.push(err.message));
+        // Neither in the education phase nor any education_progress/content --
+        // the tab must not appear at all (existing dataKey-gated behavior,
+        // unchanged by the FE-002 visibility fix).
+        await bypassAuth(page, 'development');
+        await gotoApp(page);
+
+        const eduTab = page.locator('.results-tab', { hasText: 'Education' });
+        await expect(eduTab).toHaveCount(0);
+
+        await page.screenshot({ path: `${SCREENSHOTS_DIR}/journal-09-tab-hidden.png` });
+    });
 });
