@@ -79,6 +79,7 @@ class HistoryResponse(BaseModel):
     session_id: str
     messages: list[HistoryMessage]
     answered_responses: dict[str, Any] = Field(default_factory=dict)
+    scenario_responses: dict[str, Any] = Field(default_factory=dict)
 
 
 # --- Widget re-hydration helpers ---
@@ -329,11 +330,13 @@ async def get_session_history(
             logger.warning("Failed to parse events for session %s: %s", session_id, e)
             # Graceful degradation: return empty messages on corrupt events_json
 
-    # Fetch answered responses so widgets can show completed state
+    # Fetch answered responses (Likert) and scenario responses so widgets can
+    # show completed state and let ScenarioCard prefill a prior choice on replay.
     answered_responses: dict[str, Any] = {}
+    scenario_responses: dict[str, Any] = {}
     with get_db_session() as conn:
         state_row = conn.execute(
-            "SELECT responses FROM assessment_state WHERE user_id = ? ORDER BY created_at DESC LIMIT 1",
+            "SELECT responses, scenario_responses FROM assessment_state WHERE user_id = ? ORDER BY created_at DESC LIMIT 1",
             (user_id,),
         ).fetchone()
         if state_row and state_row["responses"]:
@@ -348,11 +351,24 @@ async def get_session_history(
                     "Failed to parse assessment_state.responses for user %s: %s",
                     user_id, e,
                 )
+        if state_row and state_row["scenario_responses"]:
+            try:
+                scenario_responses = (
+                    json.loads(state_row["scenario_responses"])
+                    if isinstance(state_row["scenario_responses"], str)
+                    else state_row["scenario_responses"]
+                )
+            except Exception as e:
+                logger.warning(
+                    "Failed to parse assessment_state.scenario_responses for user %s: %s",
+                    user_id, e,
+                )
 
     return HistoryResponse(
         session_id=session_id,
         messages=messages,
         answered_responses=answered_responses,
+        scenario_responses=scenario_responses,
     )
 
 
