@@ -30,6 +30,10 @@ class SingleResponseRequest(BaseModel):
     question_id: str
     score: Optional[int] = None
     skipped_reason: Optional[str] = None
+    # Scenario (SJT) responses from the ScenarioCard widget set type="scenario"
+    # and choice_key; Likert responses leave these unset and use score.
+    type: Optional[str] = None
+    choice_key: Optional[str] = None
 
 
 class BatchResponseRequest(BaseModel):
@@ -84,8 +88,48 @@ def save_response(
     body: SingleResponseRequest,
     user_id: str = Depends(get_current_user_id),
 ):
-    """Save a single Likert response directly (bypasses agent)."""
+    """Save a single Likert or scenario response directly (bypasses agent)."""
     qb = get_question_bank()
+
+    # Scenario (SJT) responses live in a separate index and persist to
+    # scenario_responses. quadrant_weight is scoring data resolved server-side
+    # from the scenario definition — never trusted from the client. Mirrors
+    # tools.save_scenario_response.
+    if body.type == "scenario":
+        scenario = qb.get_scenario_by_id(body.question_id)
+        if not scenario:
+            raise HTTPException(status_code=404, detail=f"Scenario not found: {body.question_id}")
+
+        quadrant_weight = None
+        for c in scenario.get("choices", []):
+            if c["key"] == body.choice_key:
+                quadrant_weight = c.get("quadrant_weight", {})
+                break
+        if quadrant_weight is None:
+            raise HTTPException(
+                status_code=400,
+                detail=f"Invalid choice '{body.choice_key}' for scenario {body.question_id}",
+            )
+
+        with get_db_session() as conn:
+            _validate_assessment_phase(conn, user_id)
+            responses, scenario_responses = _get_or_create_state(conn, user_id)
+
+            scenario_responses[body.question_id] = {
+                "choice": body.choice_key,
+                "quadrant_weight": quadrant_weight,
+                "maslow_level": scenario.get("maslow_level"),
+                "answered_at": datetime.utcnow().isoformat(),
+            }
+
+            conn.execute(
+                "UPDATE assessment_state SET scenario_responses = ?, updated_at = ? WHERE user_id = ? AND id = (SELECT id FROM assessment_state WHERE user_id = ? ORDER BY created_at DESC LIMIT 1)",
+                (json.dumps(scenario_responses), datetime.utcnow().isoformat(), user_id, user_id),
+            )
+
+        progress = _compute_progress(responses, scenario_responses)
+        return ResponseSaveResult(saved=True, question_id=body.question_id, progress=progress)
+
     question = qb.get_question_by_id(body.question_id)
     if not question:
         raise HTTPException(status_code=404, detail=f"Question not found: {body.question_id}")
