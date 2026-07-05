@@ -230,7 +230,7 @@ test.describe('Session Resume (FE-001)', () => {
     await expect(chatMessages).toContainText('My question from history');
   });
 
-  test('answered Likert widget renders as read-only in history', async ({ page }) => {
+  test('answered Likert widget renders pre-filled but editable in history', async ({ page }) => {
     const sessionId = 'test-session-id';
     const qid = 'q-test-001';
 
@@ -247,13 +247,13 @@ test.describe('Session Resume (FE-001)', () => {
               data: {
                 event_type: 'assessment.question_batch',
                 batch_id: 'batch1',
-                dimension: 'Moral Awareness',
-                sub_dimension: 'Sensitivity',
+                dimension: 'Meta-Cognitive Awareness',
+                sub_dimension: 'Self-Reflective Insight',
                 count: 1,
                 questions: [{
                   id: qid,
-                  text: 'I notice ethical dilemmas in everyday situations.',
-                  scale_type: 'agreement',
+                  text: 'I take time to reflect on my thoughts and reactions.',
+                  scale_type: 'agreement_5',
                   scale_labels: ['Strongly Disagree', 'Disagree', 'Neutral', 'Agree', 'Strongly Agree']
                 }]
               }
@@ -262,6 +262,20 @@ test.describe('Session Resume (FE-001)', () => {
           answered_responses: {
             [qid]: { score: 4, type: 'likert' }
           }
+        })
+      });
+    });
+
+    // Editing a history answer upserts via this endpoint — mock it so the
+    // re-click below is hermetic (no live-backend auth/rate-limit coupling).
+    await page.route('**/api/assessment/responses', route => {
+      route.fulfill({
+        status: 200,
+        contentType: 'application/json',
+        body: JSON.stringify({
+          saved: true,
+          question_id: qid,
+          progress: { answered: 1, total: 75 },
         })
       });
     });
@@ -277,16 +291,33 @@ test.describe('Session Resume (FE-001)', () => {
     const likertCard = page.locator('.widget-card').first();
     await expect(likertCard).toBeVisible({ timeout: 3000 });
 
-    // The 4th option (Agree, index 3) should be selected
+    // A fully-answered batch auto-collapses on render in history mode
+    // (likert-card.js:118), so expand it before interacting. The header only
+    // toggles once the batch is complete (likert-card.js:95) — which it is,
+    // since the single question is pre-answered.
+    await expect(likertCard).toHaveClass(/likert-batch--collapsed/);
+    await likertCard.locator('.likert-batch-progress').click();
+    await expect(likertCard).not.toHaveClass(/likert-batch--collapsed/);
+
+    // The prior answer is pre-filled: 4th option (Agree, index 3) is selected.
     const options = likertCard.locator('.likert-option');
     const fourthOption = options.nth(3);
     await expect(fourthOption).toHaveClass(/likert-option--selected/);
 
-    // All options should be disabled in history mode
+    // History answers stay EDITABLE (editable-answers feature): options remain
+    // enabled so a past answer can be changed on reload — LikertCard never
+    // disables them (see likert-card.js:175 "Options stay enabled so the user
+    // can correct a mis-click"). Read-only applies only to the chat input of an
+    // archived session (chat.js:setReadOnly), not to answered widgets.
     const allOptions = await options.all();
     for (const opt of allOptions) {
-      await expect(opt).toBeDisabled();
+      await expect(opt).toBeEnabled();
     }
+
+    // Re-clicking a different option re-selects it, proving the widget is live.
+    await options.nth(1).click();
+    await expect(options.nth(1)).toHaveClass(/likert-option--selected/);
+    await expect(fourthOption).not.toHaveClass(/likert-option--selected/);
   });
 
   test('page load produces 0 uncaught JavaScript errors', async ({ page }) => {
