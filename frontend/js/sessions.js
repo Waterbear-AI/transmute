@@ -56,7 +56,7 @@ const Sessions = (() => {
             if (res.ok) {
                 const data = await res.json();
                 if (data.messages && data.messages.length > 0) {
-                    Chat.renderHistory(data.messages, data.answered_responses || {});
+                    Chat.renderHistory(data.messages, data.answered_responses || {}, data.scenario_responses || {});
                 } else if (!isArchived) {
                     // Fresh session — trigger greeting without user needing to type.
                     Chat.startSession(sessionId);

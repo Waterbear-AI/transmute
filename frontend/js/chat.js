@@ -644,9 +644,10 @@ const Chat = (() => {
         }
     }
 
-    function renderHistory(messages, answeredResponses) {
+    function renderHistory(messages, answeredResponses, scenarioResponses) {
         clear();
         const answers = answeredResponses || {};
+        const scenarioAnswers = scenarioResponses || {};
         for (const msg of messages) {
             if (msg.role === 'user') {
                 // Suppress machine control payloads (e.g. comprehension answers)
@@ -660,7 +661,7 @@ const Chat = (() => {
                 el.appendChild(Sanitize.sanitizeHTML(html));
                 _messagesEl().appendChild(el);
             } else if (msg.role === 'widget') {
-                _renderHistoryWidget(msg.event_type, msg.data, answers);
+                _renderHistoryWidget(msg.event_type, msg.data, answers, scenarioAnswers);
             } else if (msg.role === 'system') {
                 _appendSystemMessage(msg.text);
             }
@@ -668,7 +669,7 @@ const Chat = (() => {
         _scrollToBottom();
     }
 
-    function _renderHistoryWidget(eventType, data, answers) {
+    function _renderHistoryWidget(eventType, data, answers, scenarioAnswers) {
         try {
             let el = null;
             switch (eventType) {
@@ -676,7 +677,7 @@ const Chat = (() => {
                     el = LikertCard.create(data, answers);
                     break;
                 case 'assessment.scenario':
-                    el = ScenarioCard.create(data);
+                    el = ScenarioCard.create(data, (scenarioAnswers || {})[data.scenario_id]?.choice);
                     break;
                 case 'education.comprehension':
                     // Guard: feedback events share this event_type but have no options.
