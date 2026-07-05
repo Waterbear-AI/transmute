@@ -15,6 +15,7 @@ from agents.transmutation.tools import (
     detect_check_in_regression,
     generate_comparison_snapshot,
     get_development_gate_progress,
+    get_education_content,
 )
 from api.auth import get_current_user_id
 from db.database import get_db_session
@@ -54,6 +55,7 @@ class EducationProgressResponse(BaseModel):
     exists: bool
     progress: Optional[dict[str, Any]] = None
     summary: Optional[dict[str, Any]] = None
+    content: Optional[dict[str, dict[str, str]]] = None
 
 
 class RoadmapPracticeResponse(BaseModel):
@@ -408,6 +410,13 @@ def get_results(
             (user_id,),
         ).fetchone()
 
+        # Get captured education content independently of education_progress —
+        # teaching content can exist before the first comprehension answer, so
+        # the journal (and the tab) must appear as soon as content exists, not
+        # only after record_comprehension_answer has run. Read via the shared
+        # get_education_content helper (used identically by agent tools).
+        edu_content = get_education_content(user_id)
+
         if edu_row:
             edu_progress = json.loads(edu_row["progress"] or "{}")
             total_cats = 0
@@ -417,14 +426,21 @@ def get_results(
                     total_cats += 1
                     if data.get("understanding_score", 0) >= 70:
                         completed_cats += 1
+            summary = {
+                "total_categories": total_cats,
+                "completed_categories": completed_cats,
+                "completion_pct": round(completed_cats / total_cats * 100, 1) if total_cats > 0 else 0,
+            }
+        else:
+            edu_progress = {}
+            summary = {}
+
+        if edu_row or edu_content:
             education = EducationProgressResponse(
                 exists=True,
                 progress=edu_progress,
-                summary={
-                    "total_categories": total_cats,
-                    "completed_categories": completed_cats,
-                    "completion_pct": round(completed_cats / total_cats * 100, 1) if total_cats > 0 else 0,
-                },
+                summary=summary,
+                content=edu_content or None,
             )
         else:
             education = EducationProgressResponse(exists=False)

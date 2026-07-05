@@ -507,6 +507,12 @@ class TestResetEndpoint:
             "INSERT OR IGNORE INTO safety_log (id, user_id, reason) VALUES (?, ?, ?)",
             (str(uuid.uuid4()), user_id, "should survive reset"),
         )
+        # education_content (learning journal — must be wiped on reset)
+        conn.execute(
+            "INSERT OR IGNORE INTO education_content (user_id, dimension, category, content) "
+            "VALUES (?, ?, ?, ?)",
+            (user_id, "Emotional Awareness & Regulation", "what_this_means", "Some captured teaching text."),
+        )
         conn.commit()
         conn.close()
 
@@ -567,6 +573,18 @@ class TestResetEndpoint:
 
         after = self._count_rows("safety_log", user_id)
         assert after == before
+
+    def test_reset_deletes_education_content(self):
+        """POST /reset must delete education_content rows (learning journal, BE-002)."""
+        user_id, cookies = self._register_user("r5@example.com")
+        self._seed_user_data(user_id)
+
+        assert self._count_rows("education_content", user_id) >= 1
+
+        resp = client.post("/api/sessions/reset", cookies=cookies)
+        assert resp.status_code == 200
+
+        assert self._count_rows("education_content", user_id) == 0
 
     def test_reset_resets_current_phase_to_orientation(self):
         """POST /reset must set users.current_phase back to 'orientation'."""

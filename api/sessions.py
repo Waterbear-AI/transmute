@@ -381,9 +381,10 @@ async def reset_session(
     """Full reset: wipe all progress and start fresh from orientation.
 
     Deletes all user-scoped domain data (assessment_state, profile_snapshots,
-    education_progress, development_roadmap, practice_journal, graduation_record,
-    check_in_log, moral_ledger), archives sessions, resets current_phase to
-    'orientation', and creates a fresh session. safety_log is retained.
+    education_progress, education_content, development_roadmap, practice_journal,
+    graduation_record, check_in_log, moral_ledger), archives sessions, resets
+    current_phase to 'orientation', and creates a fresh session. safety_log is
+    retained.
     """
     with get_db_session() as conn:
         # Reset user phase to orientation
@@ -409,6 +410,11 @@ async def reset_session(
         # Clear education progress
         conn.execute(
             "DELETE FROM education_progress WHERE user_id = ?",
+            (user_id,),
+        )
+        # Clear education content (learning journal)
+        conn.execute(
+            "DELETE FROM education_content WHERE user_id = ?",
             (user_id,),
         )
         # Clear development roadmap
