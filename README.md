@@ -49,7 +49,7 @@ Plot those on two axes — *how you handle harm* (Filter ↔ Amplify) and *how y
 | 🪣 **Extractor** | −F, −A | Passes harm along, keeps the good for themselves. |
 | ➡️ **Conduit** | F≈0, A≈0 | Passes things through unchanged — the neutral baseline. |
 
-These are **operating patterns, not identities**. You might be a Transmuter with your friends and an Absorber at work — at different [Maslow](https://en.wikipedia.org/wiki/Maslow%27s_hierarchy_of_needs) need levels. The assessment measures all of it across **13 dimensions** (10 awareness prerequisites + 3 transmutarian capacity dimensions).
+These are **operating patterns, not identities**. You might be a Transmuter with your friends and an Absorber at work — at different [Maslow](https://en.wikipedia.org/wiki/Maslow%27s_hierarchy_of_needs) need levels. The assessment measures all of it across **8 dimensions**: one **transmutation-capacity** dimension — your actual Filtering and Amplification, built from four flow sub-dimensions (Deprivation Filtering, Fulfillment Emission, Absorption Patterns, Amplification Awareness) — plus **7 awareness prerequisites** (emotional awareness & regulation, self-compassion, reflective functioning, relational compassion, mindful presence, meta-cognitive and systemic/temporal awareness) that shape how much you're able to transmute in the first place.
 
 ---
 
@@ -64,15 +64,24 @@ orientation → assessment → profile → education → development → reasses
 | Phase | What happens |
 |-------|--------------|
 | **Orientation** | A warm welcome and one grounding question: *what brought you here?* |
-| **Assessment** | Likert questions and real-world scenarios profile your awareness and flows. |
-| **Profile** | Your responses are scored and you meet your archetype — on the quadrant chart above, alongside a radar chart of all 13 dimensions. |
-| **Education** | The Engine teaches you the model *through your own results*, with comprehension checks. |
+| **Assessment** | A **tiered, adaptive** mix of Likert questions and real-world scenarios. Everyone answers a shared core; the assessment then deepens only on the dimensions where your signal is unclear — so a clear pattern means fewer questions. Your archetype can surface **early**, before you finish. |
+| **Profile** | Your responses are scored and you meet your archetype — on the quadrant chart above, alongside a radar chart of all 8 dimensions. |
+| **Education** | The Engine teaches you the model *through your own results*, with comprehension checks — and captures every explanation into a **learning journal** you can reopen and review anytime. |
 | **Development** | Personalized practices, a journal, and a roadmap for growth. |
 | **Reassessment** | Targeted re-measurement to see what's shifted, gated on genuine readiness. |
 | **Graduation** | A closing sequence and a profile snapshot artifact to keep. |
 | **Check-in** | Come back anytime to re-measure and reflect. |
 
 Scoring is **deterministic** (pure functions in [`scoring_engine.py`](agents/transmutation/scoring_engine.py) — no AI in the math). The LLM's job is to *interpret, teach, and coach* — never to invent your numbers.
+
+### The assessment adapts to you
+
+The v2 assessment is **tiered and screener-first**, so you answer only as many questions as your pattern actually requires:
+
+- **A shared core, always.** Everyone answers the transmutation-capacity items and a set of real-world scenarios (these are what place you on the quadrant), plus the core awareness items and the *screener* questions that open each deep-dive dimension.
+- **Deeper only where it's unclear.** A pure [`adaptive_engine.py`](agents/transmutation/adaptive_engine.py) reads your screener answers and expands a dimension into its full item set **only** when the signal is low, borderline, or inconsistent — a clear signal skips the extra questions entirely. No AI in that decision, either.
+- **An early result you can trust.** Because your archetype comes from the transmutation-capacity items and scenarios, the Engine surfaces your quadrant placement **early** — before you finish the awareness deep-dive — with a **confidence band** that firms from low → high as you answer more.
+- **Answers you can revise.** Change an earlier Likert or scenario answer — even after a reload, or from your session history — and any transmute-relevant edit re-scores the result live.
 
 ### Built-in safety, by design
 
@@ -141,7 +150,7 @@ A FastAPI monolith with a clean separation between the deterministic core, the a
 ┌───────────────▼──────────────┐  ┌─────────▼──────────────────┐
 │  Agent layer  (Google ADK)   │  │  Deterministic core         │
 │  root orchestrator routes to │  │  scoring_engine · flow_engine│
-│  7 sub-agents by phase       │  │  question_bank · sentinel    │
+│  7 sub-agents by phase       │  │  adaptive_engine · sentinel  │
 │  + LiteLLM provider adapter  │  │  pure functions, fully tested│
 └───────────────┬──────────────┘  └─────────┬──────────────────┘
                 └──────────────┬─────────────┘
@@ -156,6 +165,7 @@ A FastAPI monolith with a clean separation between the deterministic core, the a
 **Design notes worth knowing:**
 
 - **The scoring is pure.** `scoring_engine.py` and `flow_engine.py` take responses in and return scores out — no database, no network, no AI. That's what makes the math auditable and the tests fast.
+- **The assessment adapts, deterministically.** `adaptive_engine.py` decides when to deepen a dimension purely from your screener answers (low, borderline, or inconsistent signal expands it; a clear signal skips it). Like the scoring, that routing is a pure function with no AI in the loop.
 - **One root agent, seven specialists.** The [root orchestrator](agents/transmutation/agent.py) handles orientation itself and transfers to a sub-agent per phase using ADK's built-in agent transfer.
 - **Provider-agnostic.** Swap Anthropic for OpenAI, Bedrock, or a local Ollama model by editing one YAML block — the LiteLLM adapter handles the rest.
 - **Built to port.** The entire `agents/` directory is designed to lift cleanly into a larger multi-tenant platform later; only the auth and storage layers would be swapped.
@@ -172,7 +182,8 @@ transmute/
 │   ├── prompts/             #   phase prompts + shared safety/concepts
 │   ├── scoring_engine.py    #   deterministic scoring  ← no AI
 │   ├── flow_engine.py       #   fulfillment/deprivation flow math
-│   └── question_bank.py     #   assessment questions & scenarios
+│   ├── adaptive_engine.py   #   pure screener-first routing  ← no AI
+│   └── question_bank.py     #   tiered assessment questions & scenarios
 ├── api/                     # FastAPI routers (auth, chat, assessment, results…)
 ├── db/                      # SQLite access + versioned migrations
 ├── models/                  # Pydantic domain models
@@ -208,7 +219,7 @@ CI runs the unit, integration, and end-to-end suites on every pull request to `m
 
 ## Roadmap & status
 
-This is an early, actively developed MVP. The assessment, scoring, profile, education, and development phases are working end-to-end; the reassessment → graduation → check-in lifecycle loop is the current focus. Designed from day one to run on a local network so a small group — a family, a team, a research cohort — can each have their own private session.
+This is an early, actively developed MVP. The **tiered adaptive assessment** (with its early transmute result and editable answers), deterministic scoring, profile, the **education learning journal**, and development phases are working end-to-end; the reassessment → graduation → check-in lifecycle loop is the current focus. Designed from day one to run on a local network so a small group — a family, a team, a research cohort — can each have their own private session.
 
 ---
 
@@ -216,7 +227,7 @@ This is an early, actively developed MVP. The assessment, scoring, profile, educ
 
 Contributions are welcome — whether that's code, assessment scenarios, prompt refinements, or framework critique. A good first step:
 
-1. Read the design docs in [`docs/plans/`](docs/plans/) to understand the architecture and intent.
+1. Read the [**Architecture**](#architecture) section above, then skim `agents/transmutation/` — the agent is self-contained, and the deterministic engines are the source of truth for how scoring and routing work.
 2. Open an issue describing what you'd like to change or add.
 3. Keep the deterministic core deterministic — scoring changes need tests.
 
@@ -226,7 +237,7 @@ Please be mindful that this project deals with sensitive emotional material. The
 
 ## License
 
-Released under the **[MIT License](LICENSE)** — free and open source, **free forever**, which is a core goal of the project (see [`docs/plans/transmute-standalone-mvp.md`](docs/plans/transmute-standalone-mvp.md)). Use it, fork it, build on it.
+Released under the **[MIT License](LICENSE)** — free and open source, **free forever**, which is a core goal of the project. Use it, fork it, build on it.
 
 ---
 
