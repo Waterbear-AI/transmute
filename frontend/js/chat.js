@@ -307,6 +307,13 @@ const Chat = (() => {
                 // agent message immediately, rather than buffering like the
                 // interactive widgets above.
                 _appendEducationContent(data.content);
+                // Also forward to the Results panel so the "What You've Learned"
+                // journal grows live as each section is taught (same forwarding
+                // the domain events below do). Without this the journal only
+                // updates on a full page reload.
+                if (typeof Results !== 'undefined') {
+                    Results.handleSSEEvent(eventType, data);
+                }
                 break;
 
             case 'assessment.progress':

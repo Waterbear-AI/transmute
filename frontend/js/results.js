@@ -177,6 +177,28 @@ const Results = (() => {
                 if (_activeTab === 'education') _renderTabContent('education');
                 break;
 
+            case 'education.content':
+                // Live journal update: the coach just captured a teaching
+                // section. Merge it into education_progress.content keyed by
+                // dimension -> category so "What You've Learned" grows as the
+                // user goes — no page reload needed. The container may not
+                // exist yet (the tab can be reached in the education phase
+                // before any progress row), so initialise it.
+                if (data && data.dimension && data.category && data.content != null) {
+                    if (!_resultsData.education_progress) {
+                        _resultsData.education_progress = { exists: true };
+                    }
+                    const _edu = _resultsData.education_progress;
+                    if (!_edu.content) _edu.content = {};
+                    if (!_edu.content[data.dimension]) _edu.content[data.dimension] = {};
+                    _edu.content[data.dimension][data.category] = data.content;
+                }
+                // Re-render the tab strip (the Education tab becomes visible once
+                // education data exists) and repaint if it's the active tab.
+                _renderTabs();
+                if (_activeTab === 'education') _renderTabContent('education');
+                break;
+
             case 'development.roadmap':
             case 'development.practice':
                 // ADR-4: the tool payload shape (total_entries, saved, …) does NOT match the
