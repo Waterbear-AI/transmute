@@ -2157,12 +2157,27 @@ body {
     display: none;
 }
 
+/* Inline SVG chevron in a <span> wrapper (the span rotates reliably; a raw
+   <svg> does not, due to transform-box: view-box). Points right when
+   collapsed, rotates 90deg to point down when the parent section is
+   expanded. */
 .edu-journal__chevron {
-    display: inline-block;
-    width: 16px;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    width: 20px;
+    height: 20px;
     color: var(--color-text-muted);
-    font-size: 16px;
-    line-height: 1;
     flex: 0 0 auto;
-    transition: color 0.15s;
+    transform: rotate(0deg);
+    transition: transform 0.18s ease, color 0.15s;
+}
+.edu-journal__chevron svg {
+    display: block;
+    width: 100%;
+    height: 100%;
+}
+.edu-journal__dim:not(.edu-journal__dim--collapsed) > .edu-journal__dim-header .edu-journal__chevron,
+.edu-journal__cat:not(.edu-journal__cat--collapsed) > .edu-journal__cat-header .edu-journal__chevron {
+    transform: rotate(90deg);
 }

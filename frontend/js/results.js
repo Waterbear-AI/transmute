@@ -1021,6 +1021,33 @@ const Results = (() => {
      * (fallback: insertion/object-key order for any dimension not in that
      * list); categories within a dimension follow EDUCATION_CATEGORIES order.
      */
+    // Inline SVG chevron (Lucide-style, rounded) used as the accordion
+    // disclosure icon. Built with createElementNS from a static developer-
+    // authored path (no innerHTML). The SVG is wrapped in a <span> because
+    // CSS `transform` is unreliable directly on an <svg> element (default
+    // transform-box: view-box) — the span is a normal HTML box that rotates
+    // reliably. The span points right by default and rotates to point down
+    // when expanded, purely via CSS keyed off the parent's --collapsed class.
+    function _journalChevron() {
+        const NS = 'http://www.w3.org/2000/svg';
+        const svg = document.createElementNS(NS, 'svg');
+        svg.setAttribute('viewBox', '0 0 24 24');
+        svg.setAttribute('fill', 'none');
+        svg.setAttribute('stroke', 'currentColor');
+        svg.setAttribute('stroke-width', '2.5');
+        svg.setAttribute('stroke-linecap', 'round');
+        svg.setAttribute('stroke-linejoin', 'round');
+        const path = document.createElementNS(NS, 'path');
+        path.setAttribute('d', 'M9 6l6 6-6 6');
+        svg.appendChild(path);
+
+        const span = document.createElement('span');
+        span.className = 'edu-journal__chevron';
+        span.setAttribute('aria-hidden', 'true');
+        span.appendChild(svg);
+        return span;
+    }
+
     function _renderEducationJournal(el, content) {
         const header = document.createElement('h3');
         header.style.marginTop = '16px';
@@ -1074,11 +1101,7 @@ const Results = (() => {
         header.className = 'edu-journal__dim-header';
         header.setAttribute('aria-expanded', 'false');
 
-        const chevron = document.createElement('span');
-        chevron.className = 'edu-journal__chevron';
-        chevron.setAttribute('aria-hidden', 'true');
-        chevron.textContent = '▸'; // ▸
-        header.appendChild(chevron);
+        header.appendChild(_journalChevron());
 
         const label = document.createElement('span');
         Sanitize.setText(label, dim);
@@ -1097,7 +1120,6 @@ const Results = (() => {
         header.addEventListener('click', () => {
             const collapsed = wrap.classList.toggle('edu-journal__dim--collapsed');
             header.setAttribute('aria-expanded', collapsed ? 'false' : 'true');
-            chevron.textContent = collapsed ? '▸' : '▾'; // ▸ vs ▾
         });
         wrap.classList.add('edu-journal__dim--collapsed');
 
@@ -1118,11 +1140,7 @@ const Results = (() => {
         header.className = 'edu-journal__cat-header';
         header.setAttribute('aria-expanded', 'false');
 
-        const chevron = document.createElement('span');
-        chevron.className = 'edu-journal__chevron';
-        chevron.setAttribute('aria-hidden', 'true');
-        chevron.textContent = '▸'; // ▸
-        header.appendChild(chevron);
+        header.appendChild(_journalChevron());
 
         const label = document.createElement('span');
         Sanitize.setText(label, catLabel);
@@ -1138,7 +1156,6 @@ const Results = (() => {
         header.addEventListener('click', () => {
             const collapsed = wrap.classList.toggle('edu-journal__cat--collapsed');
             header.setAttribute('aria-expanded', collapsed ? 'false' : 'true');
-            chevron.textContent = collapsed ? '▸' : '▾'; // ▸ vs ▾
         });
 
         return wrap;
